@@ -34,6 +34,18 @@ Tasks live in the Notion hub (Tasks database). Each task names its owner (M1/M2/
 5. **No new libraries or services** unless they're in §4. If one is truly needed, propose updating §4 first.
 6. **API keys only in `.env`.** Never in code, tests, prompts, logs or commits. `.env.example` holds names only.
 
+## Keep changes small
+
+Same approach as the `ponytail` plugin (full level), so every agent works the same way:
+
+- **Smallest complete change.** In order, take the first that works: don't build it (nobody asked) → reuse what's in this repo → standard library → an already-installed dependency → the minimum new code.
+- **Small, but finished:** update every caller, test and fixture your change touches. Never cut validation at trust boundaries, error handling that prevents data loss, security, accessibility, or anything the task or design asks for.
+- No abstractions, wrappers, options or "for later" code. Deleting beats adding. Keep the repo's existing structure.
+- New non-trivial logic (a branch, a loop, a parser) gets one small test. Trivial changes need none.
+- A shortcut with a known limit gets a comment: `# shortcut: <the limit>, <when to upgrade>`. Find them all with `git grep "shortcut:"`.
+
+The design doc sets the **scope** (what must exist); this section sets **how** to build it.
+
 ## Folder ownership
 
 | Folder | Owner | Notes |
