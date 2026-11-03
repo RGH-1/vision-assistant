@@ -917,7 +917,7 @@ vision-assistant/
 └── data/                          ← not in git: frames, thumbs, originals, videos, model files
 ```
 
-**Git:** `main` always runs. Use small branches (`m1/…`, `m2/…`, `m3/…`); another member reviews each PR. Commit under your own name, since that's the evidence for "who did what". Tags: `v0.1-skeleton` (Nov 10), `v0.5-complete` (Nov 17), `v1.0-demo` (Nov 24).
+**Git:** `main` is stable and demo-ready; `dev` is where work comes together. Each task gets a small feature branch from `dev` (`m1/va-<id>-…`, `m2/…`, `m3/…`) that goes back into `dev` by PR, and another member reviews each PR. `dev` is merged into `main` at each milestone. Commit under your own name, since that's the evidence for "who did what". Tags: `v0.1-skeleton` (Nov 10), `v0.5-complete` (Nov 17), `v1.0-demo` (Nov 24).
 
 **Code style:** Python with `ruff`, type hints, `pydantic` for every request and response, `pytest`. Flutter: `flutter analyze` clean. Dashboard: TypeScript strict, ESLint.
 

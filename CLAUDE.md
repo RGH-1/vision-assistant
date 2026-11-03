@@ -88,10 +88,19 @@ npm install ; npm run dev ; npm run lint ; npm test ; npm run build
 
 ## Git
 
-- `main` always runs. Branch per task: `m1/<short-name>`, `m2/…`, `m3/…`, `all/…`.
-- PR → one other member reviews → merge. Put the PR link in the task's **PR / Branch** field.
+| Branch | Purpose | Merges into |
+|---|---|---|
+| `main` | Stable, always demo-ready. Only milestone merges from `dev` + tags. Nobody commits directly. | — |
+| `dev` | Integration: all finished features land here. Must always run. | `main` at each milestone |
+| `m1/…`, `m2/…`, `m3/…`, `all/…` | One feature branch per Notion task, cut from `dev`, short-lived | `dev` via PR |
+
+- Name feature branches `<owner>/va-<id>-<short-name>`, e.g. `m2/va-12-db-schema` (ID from the Notion task).
+- Start: `git switch dev ; git pull ; git switch -c m2/va-12-db-schema`. Keep it up to date with `git pull origin dev` (merge, no rebase of pushed branches).
+- PR into `dev` → one other member reviews → merge → delete the branch. Put the PR link in the task's **PR / Branch** field.
+- Agents work only on a feature branch — never commit to `dev` or `main` directly.
+- Fix for a demo-breaking bug on `main`: branch `hotfix/<name>` from `main`, PR into `main`, then merge `main` back into `dev`.
 - Commit under the human owner's name (it's the evidence for "who did what"). Never commit `.env`, `data/`, or model weights.
-- Tags: `v0.1-skeleton` (Nov 10), `v0.5-complete` (Nov 17), `v1.0-demo` (Nov 24, 18:00 code freeze).
+- Milestones: merge `dev` → `main`, then tag `main`: `v0.1-skeleton` (Nov 10), `v0.5-complete` (Nov 17), `v1.0-demo` (Nov 24, 18:00 code freeze).
 
 ## When you finish a task
 

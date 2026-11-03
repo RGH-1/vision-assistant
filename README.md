@@ -35,6 +35,10 @@ uv run pytest                 # server tests
 
 Start-up (`start.ps1`), firewall rules and the demo steps are added as those tasks land (design §5.2, §16).
 
+## Branches
+
+`main` (stable, demo-ready) ← `dev` (integration) ← feature branches `m1/va-<id>-<name>`, `m2/…`, `m3/…` (one per Notion task, cut from `dev`, merged back by reviewed PR). Details in [CLAUDE.md](CLAUDE.md#git).
+
 ## Team
 
 | | Area |
