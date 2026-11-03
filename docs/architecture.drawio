@@ -1,0 +1,270 @@
+<mxfile host="Electron">
+  <diagram name="Architecture v3" id="va-arch-v3">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="&lt;b&gt;Vision Assistant — Architecture v3&lt;/b&gt; — see Vision_Assistant_Design.md §5" style="text;html=1;fontSize=15;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="20" y="2" width="700" height="24" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Lanes ===== -->
+        <mxCell id="L_phone" value="Android phone — Flutter (M1)" style="swimlane;whiteSpace=wrap;html=1;startSize=30;rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="60" width="240" height="560" as="geometry" />
+        </mxCell>
+        <mxCell id="L_mtx" value="MediaMTX — config only (M1)" style="swimlane;whiteSpace=wrap;html=1;startSize=30;rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="290" y="60" width="210" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="L_srv" value="Laptop — ONE Python program (FastAPI, uv run python -m server)" style="swimlane;whiteSpace=wrap;html=1;startSize=30;rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="530" y="60" width="640" height="900" as="geometry" />
+        </mxCell>
+        <mxCell id="G_ing" value="Ingest thread — GPU (M2)" style="swimlane;whiteSpace=wrap;html=1;startSize=26;rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="L_srv">
+          <mxGeometry x="15" y="40" width="300" height="790" as="geometry" />
+        </mxCell>
+        <mxCell id="G_web" value="Web routes + WebSockets — CPU (M3)" style="swimlane;whiteSpace=wrap;html=1;startSize=26;rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="L_srv">
+          <mxGeometry x="325" y="40" width="300" height="790" as="geometry" />
+        </mxCell>
+        <mxCell id="L_store" value="Storage (M2)" style="swimlane;whiteSpace=wrap;html=1;startSize=30;rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="530" y="990" width="420" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="L_cloud" value="Free cloud + local fallbacks (M3)" style="swimlane;whiteSpace=wrap;html=1;startSize=30;rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="60" width="250" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="L_dash" value="Dashboard — React (M1)" style="swimlane;whiteSpace=wrap;html=1;startSize=30;rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="430" width="250" height="400" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Phone ===== -->
+        <mxCell id="p_cam" value="Rear camera (720p, video only)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_phone">
+          <mxGeometry x="20" y="50" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="p_whip" value="flutter_webrtc&lt;br&gt;WHIP publisher (H.264)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_phone">
+          <mxGeometry x="20" y="115" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="p_ptt" value="Hold-to-talk (whole screen)&lt;br&gt;beeps + vibration" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_phone">
+          <mxGeometry x="20" y="200" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="p_rec" value="Recorder&lt;br&gt;WAV 16 kHz mono ≤ 10 s" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_phone">
+          <mxGeometry x="20" y="265" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="p_tts" value="flutter_tts&lt;br&gt;speaks answers + alerts (EN / AR)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_phone">
+          <mxGeometry x="20" y="360" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="p_ws" value="WebSocket client&lt;br&gt;alerts + status" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_phone">
+          <mxGeometry x="20" y="425" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="p_acc" value="Consent · TalkBack labels · wakelock&lt;br&gt;reconnect · spoken errors" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;dashed=1;" vertex="1" parent="L_phone">
+          <mxGeometry x="20" y="495" width="200" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== MediaMTX ===== -->
+        <mxCell id="m_whip" value="WHIP in&lt;br&gt;:8889/phone/whip" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_mtx">
+          <mxGeometry x="15" y="50" width="180" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="m_rtsp" value="RTSP out&lt;br&gt;rtsp://localhost:8554/phone" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_mtx">
+          <mxGeometry x="15" y="125" width="180" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="m_whep" value="WHEP out&lt;br&gt;:8889/phone/whep" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_mtx">
+          <mxGeometry x="15" y="200" width="180" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Ingest thread ===== -->
+        <mxCell id="i_read" value="RTSP reader&lt;br&gt;newest frame, sample 5 Hz" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="36" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_q" value="Quality: Laplacian sharpness (adaptive)&lt;br&gt;brightness · contrast" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="96" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_en" value="Enhance (dark / flat / soft)&lt;br&gt;gamma + CLAHE · unsharp mask" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="156" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_nov" value="New? dHash Hamming distance&lt;br&gt;(or new objects / 10 s heartbeat)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="216" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_det" value="YOLOE open-vocabulary detection&lt;br&gt;door · stairs · sign · chair · keys …" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="276" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_keep" value="Keep? informative (objects / sign / edges)&lt;br&gt;best frame of each 1 s window" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="336" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_blur" value="Face blur — YuNet detector&lt;br&gt;(no recognition)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="396" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_ocr" value="EasyOCR (ar + en)&lt;br&gt;+ upscaled sign crops · Arabic normalization" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="456" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_clip" value="CLIP image vector (512-d)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="516" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_store" value="Store JPEG + thumbnail + rows" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;fontStyle=1;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="576" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_alr" value="Alert rules (bonus)&lt;br&gt;center + size + 3 of 5 frames · cooldown" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;dashed=1;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="646" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="i_ret" value="Retention every 60 s&lt;br&gt;delete rows + files older than 30 min" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_ing">
+          <mxGeometry x="15" y="716" width="270" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Web side ===== -->
+        <mxCell id="a_ask" value="POST /v1/ask&lt;br&gt;(audio, session, language)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;fontStyle=1;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="36" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_stt" value="Whisper client&lt;br&gt;Groq first, local faster-whisper fallback" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="96" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_qu" value="Query understanding — 7 intents (rules)&lt;br&gt;intent · time window · target objects" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="156" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_ret" value="Hybrid retrieval + ranking&lt;br&gt;time + CLIP + OCR text + objects + recency" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="216" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_gate" value="Evidence gate&lt;br&gt;weak / refused → fixed reply (no Gemini call)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="276" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_gen" value="Answer generator&lt;br&gt;≤ 3 frames + objects + text + times → Gemini" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="336" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_safe" value="Safety filter&lt;br&gt;&quot;not sure&quot; wording · never &quot;safe&quot; · same language" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="396" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_log" value="Save question + evidence + timings&lt;br&gt;→ answer JSON to phone" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="456" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_hub" value="Event hub → WebSockets&lt;br&gt;/v1/ws/phone · /v1/ws/dashboard" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;fontStyle=1;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="546" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="a_rest" value="REST for dashboard&lt;br&gt;/v1/frames · /v1/questions · /v1/alerts · /v1/status" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="G_web">
+          <mxGeometry x="15" y="626" width="270" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s_buf" value="Live buffer — last 10 frames (in memory)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;dashed=1;fillColor=#ffffff;" vertex="1" parent="L_srv">
+          <mxGeometry x="15" y="840" width="300" height="45" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Storage ===== -->
+        <mxCell id="s_pg" value="&lt;b&gt;PostgreSQL 16 + pgvector + pg_trgm&lt;/b&gt;&lt;br&gt;sessions · frames (CLIP, HNSW) · detections · ocr_texts · questions · evidence · alerts" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;size=10;fontSize=10;" vertex="1" parent="L_store">
+          <mxGeometry x="20" y="40" width="240" height="88" as="geometry" />
+        </mxCell>
+        <mxCell id="s_fs" value="&lt;b&gt;JPEG folder&lt;/b&gt;&lt;br&gt;frames · thumbs · originals" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;size=10;fontSize=10;" vertex="1" parent="L_store">
+          <mxGeometry x="280" y="40" width="125" height="88" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Cloud ===== -->
+        <mxCell id="c_groq" value="Groq Whisper large-v3-turbo&lt;br&gt;(free tier)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_cloud">
+          <mxGeometry x="20" y="50" width="210" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="c_fw" value="Fallback: faster-whisper medium&lt;br&gt;(local CPU)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;dashed=1;" vertex="1" parent="L_cloud">
+          <mxGeometry x="20" y="115" width="210" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="c_gem" value="Gemini 3.6 Flash&lt;br&gt;(free tier, JSON output)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_cloud">
+          <mxGeometry x="20" y="190" width="210" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="c_lite" value="Fallback: Flash-Lite →&lt;br&gt;template answer from DB" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;dashed=1;" vertex="1" parent="L_cloud">
+          <mxGeometry x="20" y="255" width="210" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Dashboard ===== -->
+        <mxCell id="d_live" value="Live video (WHEP player)&lt;br&gt;+ object box overlay" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_dash">
+          <mxGeometry x="20" y="50" width="210" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="d_stat" value="Status&lt;br&gt;fps · saved/min · API health · GPU" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_dash">
+          <mxGeometry x="20" y="120" width="210" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="d_tl" value="Timeline + search&lt;br&gt;time · text · object · meaning" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_dash">
+          <mxGeometry x="20" y="190" width="210" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="d_qa" value="Q&amp;amp;A history&lt;br&gt;intent · evidence · score parts · timings" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_dash">
+          <mxGeometry x="20" y="260" width="210" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="d_alr" value="Alerts · Delete all data · Ask by typing" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" vertex="1" parent="L_dash">
+          <mxGeometry x="20" y="330" width="210" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Edges: streaming ===== -->
+        <mxCell id="e_cam" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="p_cam" target="p_whip"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_whip" value="WebRTC (WHIP)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;strokeWidth=2;" edge="1" parent="1" source="p_whip" target="m_whip"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_remux" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="m_whip" target="m_rtsp"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_whep_int" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="m_whip" target="m_whep">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="296" y="134" /><mxPoint x="296" y="284" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_rtsp" value="RTSP" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="m_rtsp" target="i_read"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_whep" value="WebRTC (WHEP)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="m_whep" target="d_live">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="515" y="284" /><mxPoint x="515" y="50" /><mxPoint x="1185" y="50" /><mxPoint x="1185" y="504" /></Array></mxGeometry>
+        </mxCell>
+
+        <!-- ===== Edges: ingest ===== -->
+        <mxCell id="e_i1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="i_read" target="i_q"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_i2" value="dark / flat / soft" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="i_q" target="i_en"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_i2b" value="ok" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="i_q" target="i_nov">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="553" y="220" /><mxPoint x="553" y="340" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_i3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="i_en" target="i_nov"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_i4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="i_nov" target="i_det"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_i5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="i_det" target="i_keep"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_i6" value="keep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="i_keep" target="i_blur"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_i7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="i_blur" target="i_ocr"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_i8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="i_ocr" target="i_clip"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_i9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="i_clip" target="i_store"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_alr_in" value="detections (every frame)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="i_det" target="i_alr">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="549" y="400" /><mxPoint x="549" y="770" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_buf" value="every sampled frame" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="i_read" target="s_buf">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="840" y="160" /><mxPoint x="840" y="880" /><mxPoint x="695" y="880" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_store" value="rows + vectors, JPEG files" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;strokeWidth=2;exitX=0;exitY=0.5;entryX=0.2;entryY=0;" edge="1" parent="1" source="i_store" target="L_store">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="538" y="700" /><mxPoint x="538" y="975" /><mxPoint x="614" y="975" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_store_evt" value="frame_stored" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=1;exitY=0.5;entryX=0;entryY=0.3;" edge="1" parent="1" source="i_store" target="a_hub">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="847" y="700" /><mxPoint x="847" y="660" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_alr_evt" value="alert" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;exitX=1;exitY=0.5;entryX=0;entryY=0.7;" edge="1" parent="1" source="i_alr" target="a_hub">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="852" y="770" /><mxPoint x="852" y="680" /></Array></mxGeometry>
+        </mxCell>
+
+        <!-- ===== Edges: questions ===== -->
+        <mxCell id="e_ask" value="audio ↑ · answer JSON ↓ (HTTP)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;strokeWidth=2;startArrow=block;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="p_rec" target="a_ask">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="278" y="349" /><mxPoint x="278" y="38" /><mxPoint x="1005" y="38" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_rec_tts" value="answer" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="p_rec" target="p_tts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_ptt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="p_ptt" target="p_rec"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_a1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="a_ask" target="a_stt"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_a2" value="text" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="a_stt" target="a_qu"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_a3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="a_qu" target="a_ret"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_a4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="a_ret" target="a_gate"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_a5" value="evidence ok" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="a_gate" target="a_gen"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_a6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="a_gen" target="a_safe"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_a7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="a_safe" target="a_log"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_a8" value="query_answered" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="a_log" target="a_hub"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_abstain" value="fixed reply" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="a_gate" target="a_log">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1150" y="400" /><mxPoint x="1150" y="580" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_stt" value="audio" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=1;exitY=0.3;entryX=0;entryY=0.5;" edge="1" parent="1" source="a_stt" target="c_groq"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_stt_fb" value="on failure" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="c_groq" target="c_fw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_gen" value="images + context" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=1;exitY=0.3;entryX=0;entryY=0.5;" edge="1" parent="1" source="a_gen" target="c_gem"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_gen_fb" value="on 429 / error" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="c_gem" target="c_lite"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_ret_pg" value="hybrid SQL (+ save)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;strokeWidth=2;exitX=1;exitY=0.5;entryX=0.75;entryY=0;" edge="1" parent="1" source="a_ret" target="s_pg">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1162" y="340" /><mxPoint x="1162" y="975" /><mxPoint x="730" y="975" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_ret_buf" value="&quot;now&quot; questions" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;exitX=0;exitY=0.3;entryX=1;entryY=0.5;" edge="1" parent="1" source="a_ret" target="s_buf">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="860" y="330" /><mxPoint x="860" y="922" /></Array></mxGeometry>
+        </mxCell>
+
+        <!-- ===== Edges: WebSockets and dashboard ===== -->
+        <mxCell id="e_ws_phone" value="WebSocket: alerts + status" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.5;exitY=1;entryX=1;entryY=0.5;" edge="1" parent="1" source="a_hub" target="p_ws">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1005" y="700" /><mxPoint x="1155" y="700" /><mxPoint x="1155" y="965" /><mxPoint x="272" y="965" /><mxPoint x="272" y="509" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_ws_tts" value="speak alert" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="p_ws" target="p_tts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_ws_dash" value="WebSocket: live events" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="a_hub" target="d_stat"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_rest_tl" value="REST" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=1;exitY=0.3;entryX=0;entryY=0.5;" edge="1" parent="1" source="a_rest" target="d_tl"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_rest_qa" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.7;entryX=0;entryY=0.5;" edge="1" parent="1" source="a_rest" target="d_qa"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===== Legend ===== -->
+        <mxCell id="legend" value="&lt;b&gt;Legend&lt;/b&gt;&lt;br&gt;Thick = main data path · Dashed = fallback / bonus / refusal path&lt;br&gt;WebRTC = video · WebSocket = messages (alerts, status, events) · HTTP = uploads + queries&lt;br&gt;M1 = Mobile, streaming &amp;amp; dashboard · M2 = Images &amp;amp; database · M3 = AI assistant &amp;amp; evaluation&lt;br&gt;Started by start.ps1: Docker Postgres → mediamtx.exe → python -m server" style="text;html=1;align=left;verticalAlign=top;fontSize=11;whiteSpace=wrap;rounded=1;strokeColor=#999999;fillColor=#ffffff;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="20" y="660" width="490" height="110" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

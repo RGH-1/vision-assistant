@@ -1,0 +1,8 @@
+# eval/ — Evaluation (M3)
+
+- `questions.csv` — 30–40 test questions: `video, ask_at_s, question, lang, intent, relevant_from_s, relevant_to_s, expected_answer, answerable`
+- `run.py` — streams a video and sends each question to `/v1/ask_text` at `ask_at_s`
+- `score.py` — Recall@1/3, intent accuracy, answer accuracy, made-up rate
+- `results/` — outputs that go into `docs/results.md`
+
+Gemini replies are cached in `eval/cache/` (git-ignored) so re-scoring spends no quota. See design §11.

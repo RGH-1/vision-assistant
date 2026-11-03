@@ -1,0 +1,64 @@
+# --- Secrets (design §8.3, §9) ---
+.env
+.env.*
+!.env.example
+
+# --- Runtime data: frames, thumbs, originals, videos, model files (design §12) ---
+data/*
+!data/README.md
+
+# --- Model weights (downloaded on first run, never committed) ---
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.bin
+*.gguf
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# --- Node / dashboard ---
+node_modules/
+dashboard/dist/
+*.tsbuildinfo
+npm-debug.log*
+
+# --- Flutter / Android ---
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/release/
+*.jks
+*.keystore
+key.properties
+
+# --- MediaMTX binary (downloaded by script) ---
+infra/mediamtx.exe
+infra/mediamtx_*.zip
+
+# --- Evaluation caches (Gemini replies cached locally, design §10.2) ---
+eval/cache/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Claude Code personal settings ---
+.claude/settings.local.json
