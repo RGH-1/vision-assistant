@@ -8,7 +8,7 @@ Course project — Multimedia Databases and Image Processing, 2026–2027. Demo:
 
 - **Design (source of truth):** [Vision_Assistant_Design.md](Vision_Assistant_Design.md)
 - **Architecture diagram:** [docs/architecture.drawio](docs/architecture.drawio)
-- **Agent rules:** [CLAUDE.md](CLAUDE.md)
+- **Agent rules:** [AGENTS.md](AGENTS.md) (Claude Code reads it via `CLAUDE.md`)
 
 ## Layout
 
@@ -37,7 +37,7 @@ Start-up (`start.ps1`), firewall rules and the demo steps are added as those tas
 
 ## Branches
 
-`main` (stable, demo-ready) ← `dev` (integration) ← feature branches `m1/va-<id>-<name>`, `m2/…`, `m3/…` (one per Notion task, cut from `dev`, merged back by reviewed PR). Details in [CLAUDE.md](CLAUDE.md#git).
+`main` (stable, demo-ready) ← `dev` (integration) ← feature branches `m1/va-<id>-<name>`, `m2/…`, `m3/…` (one per Notion task, cut from `dev`, merged back by reviewed PR). Details in [AGENTS.md](AGENTS.md#git).
 
 ## Team
 
