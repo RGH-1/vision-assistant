@@ -892,7 +892,8 @@ Results go in `docs/results.md` and on 2–3 slides.
 vision-assistant/
 ├── Vision_Assistant_Design.md     ← this file
 ├── README.md                      ← install, start, demo
-├── CLAUDE.md                      ← short agent rules pointing here
+├── AGENTS.md                      ← agent rules pointing here (all coding agents)
+├── CLAUDE.md                      ← one line: imports AGENTS.md for Claude Code
 ├── .env.example  .gitignore  start.ps1
 ├── contracts/  openapi.yaml  events.schema.json
 ├── infra/  docker-compose.yml (Postgres+pgvector)  mediamtx.yml
