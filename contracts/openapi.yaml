@@ -1,0 +1,570 @@
+openapi: 3.1.0
+info:
+  title: Vision Assistant API
+  version: 0.1.0
+  description: >
+    REST contract between the phone, the dashboard and the server (design §8.1).
+    WebSocket messages are in events.schema.json. Every error uses the Error format and the
+    phone always speaks its `speak` text. This includes validation errors, which return
+    400 BAD_REQUEST instead of FastAPI's default 422, and uncaught errors, which return
+    500 INTERNAL.
+servers:
+  - url: "http://{laptopIp}:8000"
+    variables:
+      laptopIp:
+        default: localhost
+
+paths:
+  /v1/sessions:
+    post:
+      summary: Start a session
+      description: The newest session is the active one; creating a session ends any previous one.
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionCreate"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionCreated"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{id}/end:
+    post:
+      summary: End a session and keep its data until retention removes it
+      operationId: endSession
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "204":
+          description: Ended
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{id}:
+    delete:
+      summary: Delete a session and all its data, including the live buffer (§7.5)
+      operationId: deleteSession
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /v1/ask:
+    post:
+      summary: Ask by voice
+      operationId: ask
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio, session_id, lang]
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: WAV, 16 kHz mono, at most 10 s. Deleted right after transcription.
+                session_id:
+                  type: string
+                  format: uuid
+                lang:
+                  $ref: "events.schema.json#/$defs/Lang"
+      responses:
+        "200":
+          description: Answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /v1/ask_text:
+    post:
+      summary: Ask by typing (same pipeline without Whisper; for the dashboard and tests)
+      operationId: askText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, text, lang]
+              additionalProperties: false
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                text:
+                  type: string
+                  minLength: 1
+                lang:
+                  $ref: "events.schema.json#/$defs/Lang"
+      responses:
+        "200":
+          description: Answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /v1/status:
+    get:
+      summary: Current server status (same fields as the `status` WebSocket message)
+      operationId: getStatus
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: "events.schema.json#/$defs/Status"
+
+  /v1/frames:
+    get:
+      summary: List frames, newest first; with `q`, hybrid search ordered by score
+      operationId: listFrames
+      parameters:
+        - $ref: "#/components/parameters/SessionIdQuery"
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: label
+          in: query
+          description: Only frames with this detected object.
+          schema:
+            type: string
+        - name: text
+          in: query
+          description: OCR text search.
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: Search by meaning (the assistant's hybrid search).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+      responses:
+        "200":
+          description: Frames
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FrameSummary"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /v1/frames/{id}:
+    get:
+      summary: One frame with detections, OCR and quality numbers
+      operationId: getFrame
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Frame
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FrameDetail"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /v1/questions:
+    get:
+      summary: Past questions with evidence, newest first
+      operationId: listQuestions
+      parameters:
+        - $ref: "#/components/parameters/SessionIdQuery"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        "200":
+          description: Questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "events.schema.json#/$defs/QuestionRecord"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /v1/alerts:
+    get:
+      summary: Past alerts, newest first
+      operationId: listAlerts
+      parameters:
+        - $ref: "#/components/parameters/SessionIdQuery"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        "200":
+          description: Alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "events.schema.json#/$defs/Alert"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /media/{kind}/{file}:
+    get:
+      summary: A stored JPEG
+      operationId: getMedia
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            enum: [frames, thumbs, originals]
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: JPEG
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /:
+    get:
+      summary: The built dashboard
+      operationId: getDashboard
+      responses:
+        "200":
+          description: Dashboard page
+          content:
+            text/html:
+              schema:
+                type: string
+
+components:
+  parameters:
+    SessionIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionIdQuery:
+      name: session_id
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Error:
+      description: >
+        BAD_AUDIO, BAD_REQUEST → 400; NOT_FOUND → 404; STT_FAILED, GEMINI_FAILED → 502;
+        NO_STREAM → 503; INTERNAL → 500.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: STT_FAILED
+              message: Groq and local Whisper both failed.
+              speak: Sorry, something went wrong. Please try again.
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message, speak]
+          additionalProperties: false
+          properties:
+            code:
+              enum: [STT_FAILED, GEMINI_FAILED, NO_STREAM, BAD_AUDIO, BAD_REQUEST, NOT_FOUND, INTERNAL]
+            message:
+              type: string
+            speak:
+              type: string
+              description: Localized sentence the phone speaks, so the user is never left in silence.
+
+    SessionCreate:
+      type: object
+      required: [app_lang, consent_at, consent_ver]
+      additionalProperties: false
+      properties:
+        app_lang:
+          $ref: "events.schema.json#/$defs/Lang"
+        consent_at:
+          type: string
+          format: date-time
+        consent_ver:
+          type: string
+
+    SessionCreated:
+      type: object
+      required: [session_id, whip_url, ws_url]
+      additionalProperties: false
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        whip_url:
+          type: string
+          examples: ["http://192.168.1.10:8889/phone/whip"]
+        ws_url:
+          type: string
+          examples: ["ws://192.168.1.10:8000/v1/ws/phone?session_id=3f2b8c1e-7a4d-4e6f-9b1a-2c5d8e7f6a01"]
+
+    AskEvidence:
+      type: object
+      required: [frame_id, seconds_ago, thumb_url, score]
+      additionalProperties: false
+      properties:
+        frame_id:
+          type: [integer, "null"]
+          description: Null for a live-buffer frame, which is not saved.
+        seconds_ago:
+          type: number
+        thumb_url:
+          type: [string, "null"]
+        score:
+          type: number
+
+    AskResponse:
+      type: object
+      required: [question_id, transcript, lang, intent, answer, confidence, abstained, evidence, timings_ms]
+      additionalProperties: false
+      properties:
+        question_id:
+          type: integer
+        transcript:
+          type: string
+        lang:
+          $ref: "events.schema.json#/$defs/Lang"
+        intent:
+          $ref: "events.schema.json#/$defs/Intent"
+        answer:
+          type: string
+        confidence:
+          $ref: "events.schema.json#/$defs/Confidence"
+        abstained:
+          type: boolean
+          description: True when the answer is "I'm not sure" or a fixed refusal.
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/AskEvidence"
+        timings_ms:
+          $ref: "events.schema.json#/$defs/TimingsMs"
+      example:
+        question_id: 123
+        transcript: What did that sign say?
+        lang: en
+        intent: READ_TEXT_PAST
+        answer: The sign on your left said "Room 204 – Computer Lab".
+        confidence: high
+        abstained: false
+        evidence:
+          - frame_id: 812
+            seconds_ago: 14
+            thumb_url: /media/thumbs/812.jpg
+            score: 0.91
+        timings_ms: { stt: 520, understand: 2, retrieve: 40, gemini: 3100, total: 3700 }
+
+    FrameSummary:
+      type: object
+      required: [frame_id, captured_at, thumb_url, labels, text_preview, keep_reason, score]
+      additionalProperties: false
+      properties:
+        frame_id:
+          type: integer
+        captured_at:
+          type: string
+          format: date-time
+        thumb_url:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+        text_preview:
+          type: string
+        keep_reason:
+          $ref: "events.schema.json#/$defs/KeepReason"
+        score:
+          type: [number, "null"]
+          description: Set only when searching with `q`.
+
+    Bbox:
+      type: array
+      description: "[x1, y1, x2, y2], each 0 to 1."
+      items:
+        type: number
+        minimum: 0
+        maximum: 1
+      minItems: 4
+      maxItems: 4
+
+    FrameDetail:
+      type: object
+      required:
+        - frame_id
+        - session_id
+        - captured_at
+        - image_url
+        - thumb_url
+        - original_url
+        - width
+        - height
+        - sharpness
+        - brightness
+        - contrast
+        - edge_density
+        - enhanced
+        - enhance_ops
+        - keep_reason
+        - faces_blurred
+        - scene_text
+        - timings_ms
+        - detections
+        - ocr
+      additionalProperties: false
+      properties:
+        frame_id:
+          type: integer
+        session_id:
+          type: string
+          format: uuid
+        captured_at:
+          type: string
+          format: date-time
+        image_url:
+          type: string
+        thumb_url:
+          type: string
+        original_url:
+          type: [string, "null"]
+          description: Pre-enhancement copy, for before/after. Null if the frame was not enhanced.
+        width:
+          type: integer
+        height:
+          type: integer
+        sharpness:
+          type: number
+        brightness:
+          type: number
+        contrast:
+          type: number
+        edge_density:
+          type: number
+        enhanced:
+          type: boolean
+        enhance_ops:
+          type: array
+          items:
+            type: string
+        keep_reason:
+          $ref: "events.schema.json#/$defs/KeepReason"
+        faces_blurred:
+          type: integer
+        scene_text:
+          type: string
+        timings_ms:
+          $ref: "events.schema.json#/$defs/TimingsMs"
+        detections:
+          type: array
+          items:
+            type: object
+            required: [label, confidence, bbox, area_ratio, position]
+            additionalProperties: false
+            properties:
+              label:
+                type: string
+              confidence:
+                type: number
+              bbox:
+                $ref: "#/components/schemas/Bbox"
+              area_ratio:
+                type: number
+              position:
+                enum: [left, center, right]
+        ocr:
+          type: array
+          items:
+            type: object
+            required: [text, confidence, bbox, from_crop]
+            additionalProperties: false
+            properties:
+              text:
+                type: string
+              confidence:
+                type: number
+              bbox:
+                $ref: "#/components/schemas/Bbox"
+              from_crop:
+                type: boolean

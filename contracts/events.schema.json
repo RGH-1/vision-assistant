@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Vision Assistant WebSocket messages (design §8.2)",
+  "description": "Every message is a flat JSON object with a `type` field. Phone: ws://<ip>:8000/v1/ws/phone?session_id=… Dashboard: ws://<ip>:8000/v1/ws/dashboard. Both reconnect after 1, 2, 4, 8 s. $defs are shared with openapi.yaml.",
+  "oneOf": [
+    { "$ref": "#/$defs/HelloMessage" },
+    { "$ref": "#/$defs/AlertMessage" },
+    { "$ref": "#/$defs/StatusMessage" },
+    { "$ref": "#/$defs/FrameStoredMessage" },
+    { "$ref": "#/$defs/QueryAnsweredMessage" },
+    { "$ref": "#/$defs/PingMessage" },
+    { "$ref": "#/$defs/PongMessage" }
+  ],
+  "$defs": {
+    "HelloMessage": {
+      "description": "Phone → server, once after connecting.",
+      "type": "object",
+      "required": ["type", "session_id", "app_lang"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "hello" },
+        "session_id": { "type": "string", "format": "uuid" },
+        "app_lang": { "$ref": "#/$defs/Lang" }
+      }
+    },
+    "AlertMessage": {
+      "description": "Server → phone + dashboard. The phone mutes alerts itself while recording or when they are off in its settings (§6.6).",
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "alert" } },
+      "allOf": [{ "$ref": "#/$defs/Alert" }],
+      "unevaluatedProperties": false
+    },
+    "StatusMessage": {
+      "description": "Server → phone + dashboard, every 2 s.",
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "status" } },
+      "allOf": [{ "$ref": "#/$defs/Status" }],
+      "unevaluatedProperties": false
+    },
+    "FrameStoredMessage": {
+      "description": "Server → dashboard, for each saved frame.",
+      "type": "object",
+      "required": ["type", "frame_id", "captured_at", "thumb_url", "labels", "text_preview", "keep_reason"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "frame_stored" },
+        "frame_id": { "type": "integer" },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "thumb_url": { "type": "string" },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "text_preview": { "type": "string" },
+        "keep_reason": { "$ref": "#/$defs/KeepReason" }
+      }
+    },
+    "QueryAnsweredMessage": {
+      "description": "Server → dashboard: the full question record.",
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "query_answered" } },
+      "allOf": [{ "$ref": "#/$defs/QuestionRecord" }],
+      "unevaluatedProperties": false
+    },
+    "PingMessage": {
+      "description": "Either side, every 15 s. The receiver replies with pong.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "ping" } }
+    },
+    "PongMessage": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "pong" } }
+    },
+
+    "Lang": { "enum": ["en", "ar", "fr"] },
+    "Intent": {
+      "enum": ["LIVE_SCENE", "READ_TEXT_NOW", "READ_TEXT_PAST", "MEMORY", "FIND_OBJECT", "IDENTITY", "OUT_OF_SCOPE"]
+    },
+    "Confidence": { "enum": ["high", "medium", "low", "none"] },
+    "KeepReason": { "enum": ["novel", "new_objects", "text", "heartbeat"] },
+    "TimingsMs": {
+      "description": "Milliseconds per step. Steps that did not run are left out.",
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+
+    "Alert": {
+      "type": "object",
+      "required": ["alert_id", "kind", "message", "lang", "frame_id", "thumb_url", "created_at"],
+      "properties": {
+        "alert_id": { "type": "integer" },
+        "kind": { "enum": ["door_ahead", "stairs_ahead", "obstacle_ahead", "vehicle_near"] },
+        "message": { "type": "string" },
+        "lang": { "$ref": "#/$defs/Lang" },
+        "frame_id": { "type": ["integer", "null"], "description": "Null when the triggering frame was not saved." },
+        "thumb_url": { "type": ["string", "null"] },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Status": {
+      "type": "object",
+      "required": [
+        "session_id", "stream_connected", "input_fps", "analysed_fps", "saved_per_min", "frames_in_db",
+        "retention_min", "gpu_mem_mb", "last_answer_at", "groq_ok", "gemini_ok"
+      ],
+      "properties": {
+        "session_id": { "type": ["string", "null"], "format": "uuid", "description": "The active session; null if none. The dashboard uses it for its REST calls." },
+        "stream_connected": { "type": "boolean" },
+        "input_fps": { "type": "number" },
+        "analysed_fps": { "type": "number" },
+        "saved_per_min": { "type": "number" },
+        "frames_in_db": { "type": "integer" },
+        "retention_min": { "type": "integer" },
+        "gpu_mem_mb": { "type": ["number", "null"] },
+        "last_answer_at": { "type": ["string", "null"], "format": "date-time" },
+        "groq_ok": { "type": "boolean" },
+        "gemini_ok": { "type": "boolean" }
+      }
+    },
+    "QuestionEvidence": {
+      "type": "object",
+      "required": ["frame_id", "rank", "score", "parts", "thumb_url"],
+      "additionalProperties": false,
+      "properties": {
+        "frame_id": { "type": "integer" },
+        "rank": { "type": "integer" },
+        "score": { "type": "number" },
+        "parts": {
+          "type": "object",
+          "description": "Score parts, so the dashboard can explain why a frame was picked (§6.5.3).",
+          "required": ["clip", "text", "obj", "rec", "q"],
+          "additionalProperties": false,
+          "properties": {
+            "clip": { "type": "number" },
+            "text": { "type": "number" },
+            "obj": { "type": "number" },
+            "rec": { "type": "number" },
+            "q": { "type": "number" }
+          }
+        },
+        "thumb_url": { "type": "string" }
+      }
+    },
+    "QuestionRecord": {
+      "description": "One row of `questions` with its evidence. `evidence` lists saved frames only, so it is empty for answers from the live buffer.",
+      "type": "object",
+      "required": [
+        "question_id", "session_id", "asked_at", "input_mode", "stt_engine", "transcript", "lang", "intent",
+        "t_from", "t_to", "answer", "confidence", "abstained", "safety_rewrite", "model", "timings_ms", "evidence"
+      ],
+      "properties": {
+        "question_id": { "type": "integer" },
+        "session_id": { "type": "string", "format": "uuid" },
+        "asked_at": { "type": "string", "format": "date-time" },
+        "input_mode": { "enum": ["voice", "text"] },
+        "stt_engine": { "enum": ["groq", "local", null] },
+        "transcript": { "type": "string" },
+        "lang": { "$ref": "#/$defs/Lang" },
+        "intent": { "$ref": "#/$defs/Intent" },
+        "t_from": { "type": ["string", "null"], "format": "date-time" },
+        "t_to": { "type": ["string", "null"], "format": "date-time" },
+        "answer": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/Confidence" },
+        "abstained": { "type": "boolean" },
+        "safety_rewrite": { "type": "boolean" },
+        "model": { "type": ["string", "null"], "description": "gemini-3.6-flash | gemini-3.5-flash-lite | template | rule" },
+        "timings_ms": { "$ref": "#/$defs/TimingsMs" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/QuestionEvidence" } }
+      }
+    }
+  }
+}
