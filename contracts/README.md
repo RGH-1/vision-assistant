@@ -1,6 +1,8 @@
 # contracts/ — All
 
-API and event contracts (design §8). **Status: DRAFT, not frozen yet.** Freeze on Nov 5, after M1, M2 and M3 agree on the points below; later changes need all three members to agree.
+API and event contracts (design §8).
+
+**Status: DRAFT.** These become frozen once M1, M2 and M3 approve the points below; after that, any change needs all three to agree.
 
 - `openapi.yaml` — REST routes, `AskResponse`, error format (§8.1)
 - `events.schema.json` — WebSocket messages (§8.2), plus the types shared with `openapi.yaml`

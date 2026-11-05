@@ -4,8 +4,10 @@ info:
   version: 0.1.0
   description: >
     REST contract between the phone, the dashboard and the server (design §8.1).
-    WebSocket messages are in events.schema.json. Every error uses the Error format,
-    including validation errors, and the phone always speaks its `speak` text.
+    WebSocket messages are in events.schema.json. Every error uses the Error format and the
+    phone always speaks its `speak` text. This includes validation errors, which return
+    400 BAD_REQUEST instead of FastAPI's default 422, and uncaught errors, which return
+    500 INTERNAL.
 servers:
   - url: "http://{laptopIp}:8000"
     variables:
