@@ -44,6 +44,9 @@ def client(data_dir: Path) -> Iterator[TestClient]:
         mediamtx_webrtc_port=8889,
         cors_origins=[],
         clip_text_model="stub",
+        status_interval_s=60,
+        ws_ping_interval_s=60,
+        ws_send_timeout_s=1,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
     options = {"loop_factory": asyncio.SelectorEventLoop}
@@ -231,6 +234,20 @@ def test_bad_create_request_returns_bad_request(client: TestClient, body: dict[s
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "BAD_REQUEST"
     assert response.json()["error"]["speak"]
+
+
+def test_status_reports_the_active_session_and_frame_count(
+    client: TestClient, db: Connection, data_dir: Path
+) -> None:
+    before = client.get("/v1/status").json()["frames_in_db"]
+    session_id = new_session(client)
+    add_session_data(db, session_id, data_dir, "status")
+
+    status = client.get("/v1/status").json()
+
+    assert status["session_id"] == session_id
+    assert status["frames_in_db"] == before + 1
+    assert status["last_answer_at"] is not None
 
 
 def test_session_id_that_is_not_a_uuid_returns_bad_request(client: TestClient) -> None:

@@ -25,6 +25,9 @@ class Settings(BaseModel):
     sample_hz: float = 5.0
     ingest_no_frame_timeout_s: float = 3.0
     ingest_reconnect_delay_s: float = 0.25
+    status_interval_s: float
+    ws_ping_interval_s: float
+    ws_send_timeout_s: float
 
 
 def load_env_file(path: Path) -> None:
