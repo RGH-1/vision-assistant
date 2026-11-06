@@ -25,6 +25,7 @@ async def create_session(body: SessionCreate, request: Request) -> SessionCreate
             (body.app_lang, body.consent_at, body.consent_ver),
         )
         session_id = (await cursor.fetchone())["id"]
+    request.app.state.live_buffer.clear()
 
     # The address the phone used to reach us is the laptop's current IP, so no setting is needed.
     host = request.url.hostname
@@ -46,6 +47,7 @@ async def end_session(session_id: UUID, request: Request) -> None:
         )
         if await cursor.fetchone() is None:
             raise HTTPException(status_code=404)
+    request.app.state.live_buffer.clear()
 
 
 def delete_files(data_dir: Path, rows: list[dict[str, str | None]]) -> None:
@@ -58,8 +60,6 @@ def delete_files(data_dir: Path, rows: list[dict[str, str | None]]) -> None:
 
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(session_id: UUID, request: Request) -> None:
-    # shortcut: doesn't clear the live buffer, which doesn't exist yet; add that once VA-39 is
-    # merged, and call M2's purge here instead once VA-50 is merged.
     async with request.app.state.pool.connection() as conn:
         cursor = await conn.execute(
             """
@@ -79,3 +79,4 @@ async def delete_session(session_id: UUID, request: Request) -> None:
 
         # Before the commit: if a file can't be deleted, the rows stay and a retry can finish.
         await asyncio.to_thread(delete_files, request.app.state.settings.data_dir, frame_files)
+    request.app.state.live_buffer.clear()

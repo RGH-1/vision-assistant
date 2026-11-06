@@ -44,7 +44,6 @@ def client(data_dir: Path) -> Iterator[TestClient]:
         mediamtx_webrtc_port=8889,
         cors_origins=[],
         clip_text_model="stub",
-        ingest_stub_heartbeat_s=60,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
     options = {"loop_factory": asyncio.SelectorEventLoop}
@@ -156,6 +155,7 @@ def test_end_keeps_the_data_and_the_first_end_time(
 ) -> None:
     session_id = new_session(client)
     files = add_session_data(db, session_id, data_dir, "kept")
+    client.app.state.live_buffer.add(np.zeros((540, 960, 3), dtype=np.uint8), 1.0)
 
     assert client.post(f"/v1/sessions/{session_id}/end").status_code == 204
     first_end = session_row(db, session_id)["ended_at"]
@@ -165,6 +165,7 @@ def test_end_keeps_the_data_and_the_first_end_time(
     assert session_row(db, session_id)["ended_at"] == first_end
     assert row_counts(db, session_id) == [1, 1, 1]
     assert all(file.exists() for file in files)
+    assert len(client.app.state.live_buffer) == 0
 
 
 def test_delete_leaves_no_rows_or_files_and_spares_other_sessions(
@@ -174,6 +175,7 @@ def test_delete_leaves_no_rows_or_files_and_spares_other_sessions(
     other_files = add_session_data(db, other, data_dir, "other")
     session_id = new_session(client)
     files = add_session_data(db, session_id, data_dir, "deleted")
+    client.app.state.live_buffer.add(np.zeros((540, 960, 3), dtype=np.uint8), 1.0)
 
     assert client.delete(f"/v1/sessions/{session_id}").status_code == 204
 
@@ -182,6 +184,7 @@ def test_delete_leaves_no_rows_or_files_and_spares_other_sessions(
     assert not any(file.exists() for file in files)
     assert row_counts(db, other) == [1, 1, 1]
     assert all(file.exists() for file in other_files)
+    assert len(client.app.state.live_buffer) == 0
 
 
 def test_failed_file_delete_keeps_the_rows_and_can_be_retried(
