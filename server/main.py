@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
 from server.common.db import create_web_pool
-from server.common.schemas import ErrorBody, ErrorCode, ErrorResponse, Status
+from server.common.schemas import Error, ErrorCode, ErrorDetail, Status
 from server.events import EventHub
 from server.settings import Settings
 
@@ -88,7 +88,7 @@ async def get_status(request: Request) -> Status:
 
 
 def error_response(status_code: int, code: ErrorCode, message: str) -> JSONResponse:
-    body = ErrorResponse(error=ErrorBody(code=code, message=message, speak=SPEAK_ERROR))
+    body = Error(error=ErrorDetail(code=code, message=message, speak=SPEAK_ERROR))
     return JSONResponse(body.model_dump(), status_code=status_code)
 
 
