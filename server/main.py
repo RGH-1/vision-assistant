@@ -16,8 +16,11 @@ from starlette.exceptions import HTTPException
 from server.common.db import create_web_pool
 from server.common.schemas import Error, ErrorCode, ErrorDetail, Status
 from server.events import EventHub
+
 from server.ingest.live_buffer import LiveBuffer
 from server.ingest.worker import IngestSource, IngestWorker
+
+from server.routes import sessions
 from server.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -150,6 +153,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.add_exception_handler(HTTPException, handle_http_error)
     app.add_exception_handler(Exception, handle_uncaught_error)
     app.include_router(router)
+    app.include_router(sessions.router)
 
     # One mount per kind, not all of DATA_DIR, which also holds videos and model files.
     for kind in MEDIA_KINDS:

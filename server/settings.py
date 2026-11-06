@@ -18,6 +18,7 @@ class Settings(BaseModel):
     retention_minutes: int
     host: str
     port: int
+    mediamtx_webrtc_port: int
     cors_origins: list[str]
     clip_text_model: str
     rtsp_url: str = "rtsp://localhost:8554/phone"
