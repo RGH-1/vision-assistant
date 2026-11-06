@@ -10,3 +10,6 @@ cors_origins: # the dashboard's Vite dev server
 clip_text_model: clip-ViT-B-32-multilingual-v1 # §4
 ingest_no_frame_timeout_s: 3
 ingest_reconnect_delay_s: 0.25
+status_interval_s: 2 # §8.2
+ws_ping_interval_s: 15 # §8.2
+ws_send_timeout_s: 2 # a client this slow is dropped, and it reconnects
