@@ -8,4 +8,5 @@ cors_origins: # the dashboard's Vite dev server
   - http://localhost:5173
   - http://127.0.0.1:5173
 clip_text_model: clip-ViT-B-32-multilingual-v1 # §4
-ingest_stub_heartbeat_s: 5
+ingest_no_frame_timeout_s: 3
+ingest_reconnect_delay_s: 0.25

@@ -21,7 +21,10 @@ class Settings(BaseModel):
     mediamtx_webrtc_port: int
     cors_origins: list[str]
     clip_text_model: str
-    ingest_stub_heartbeat_s: float
+    rtsp_url: str = "rtsp://localhost:8554/phone"
+    sample_hz: float = 5.0
+    ingest_no_frame_timeout_s: float = 3.0
+    ingest_reconnect_delay_s: float = 0.25
 
 
 def load_env_file(path: Path) -> None:
@@ -43,5 +46,7 @@ def load_settings() -> Settings:
     return Settings(
         data_dir=ROOT / os.environ["DATA_DIR"],
         retention_minutes=int(os.environ["RETENTION_MINUTES"]),
+        rtsp_url=os.environ.get("RTSP_URL", "rtsp://localhost:8554/phone"),
+        sample_hz=float(os.environ.get("SAMPLE_HZ", "5")),
         **config,
     )
