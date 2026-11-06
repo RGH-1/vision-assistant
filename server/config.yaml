@@ -1,0 +1,10 @@
+# Tunable values, kept in git so changes show in the history (design §8.3).
+# Secrets and per-machine settings go in .env instead.
+
+host: 0.0.0.0 # the phone reaches the server over the LAN (§8.1)
+port: 8000
+cors_origins: # the dashboard's Vite dev server
+  - http://localhost:5173
+  - http://127.0.0.1:5173
+clip_text_model: clip-ViT-B-32-multilingual-v1 # §4
+ingest_stub_heartbeat_s: 5
