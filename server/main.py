@@ -19,7 +19,7 @@ from server.common.schemas import Error, ErrorCode, ErrorDetail, Status
 from server.events import EventHub
 from server.ingest.live_buffer import LiveBuffer
 from server.ingest.worker import IngestSource, IngestWorker
-from server.routes import sessions
+from server.routes import sessions, ws
 from server.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -35,26 +35,65 @@ def load_clip_text_encoder(model_name: str) -> Any:
     return ClipTextEncoder(model_name)  # the GPU belongs to ingest (§5.3)
 
 
+async def read_status(app: FastAPI) -> Status:
+    async with app.state.pool.connection() as conn:
+        cursor = await conn.execute(
+            """
+            SELECT
+                (SELECT id FROM sessions WHERE ended_at IS NULL
+                 ORDER BY started_at DESC LIMIT 1) AS session_id,
+                (SELECT count(*) FROM frames) AS frames_in_db,
+                (SELECT max(asked_at) FROM questions) AS last_answer_at
+            """
+        )
+        row = await cursor.fetchone()
+
+    # shortcut: fps and GPU numbers stay empty until M2's ingest reports them, and groq_ok and
+    # gemini_ok stay false until VA-63 and VA-64 set them.
+    return Status(
+        session_id=row["session_id"],
+        stream_connected=app.state.stream_connected,
+        input_fps=0,
+        analysed_fps=0,
+        saved_per_min=0,
+        frames_in_db=row["frames_in_db"],
+        retention_min=app.state.settings.retention_minutes,
+        gpu_mem_mb=None,
+        last_answer_at=row["last_answer_at"],
+        groq_ok=False,
+        gemini_ok=False,
+    )
+
+
+async def publish_status(app: FastAPI) -> None:
+    while True:
+        await asyncio.sleep(app.state.settings.status_interval_s)
+        try:
+            status = await read_status(app)
+        except Exception:
+            # Logged and retried, so updates resume by themselves when the database is back.
+            logger.exception("Could not read status")
+            continue
+        app.state.last_status = status
+        app.state.hub.publish({"type": "status", **status.model_dump()})
+
+
+async def publish_pings(hub: EventHub, interval_s: float) -> None:
+    while True:
+        await asyncio.sleep(interval_s)
+        hub.publish({"type": "ping"})
+
+
 def create_ingest_worker(app: FastAPI) -> IngestWorker:
     """Build the worker after the asyncio hub and live buffer exist (§5.3)."""
     settings: Settings = app.state.settings
 
     def connection_event(connected: bool) -> dict[str, Any]:
         app.state.stream_connected = connected
-        return {
-            "type": "status",
-            "session_id": None,
-            "stream_connected": connected,
-            "input_fps": 0.0,
-            "analysed_fps": 0.0,
-            "saved_per_min": 0.0,
-            "frames_in_db": 0,
-            "retention_min": settings.retention_minutes,
-            "gpu_mem_mb": None,
-            "last_answer_at": None,
-            "groq_ok": False,
-            "gemini_ok": False,
-        }
+        # Runs on the ingest thread, which can't use the web pool, so it reuses the last numbers
+        # instead of blanking them on the dashboard. §6.3.1 wants this event right away.
+        status = app.state.last_status.model_dump()
+        return {"type": "status", **status, "stream_connected": connected}
 
     return IngestWorker(
         IngestSource(settings.rtsp_url),
@@ -70,7 +109,8 @@ def create_ingest_worker(app: FastAPI) -> IngestWorker:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
-    app.state.hub = EventHub(asyncio.get_running_loop())
+    hub = EventHub(asyncio.get_running_loop(), settings.ws_send_timeout_s)
+    app.state.hub = hub
     app.state.live_buffer = LiveBuffer()
     app.state.stream_connected = False
 
@@ -81,32 +121,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             load_clip_text_encoder, settings.clip_text_model
         )
 
+        app.state.last_status = await read_status(app)
         ingest = create_ingest_worker(app)
         app.state.ingest = ingest
         ingest.start()
+        background = [
+            asyncio.create_task(hub.run()),
+            asyncio.create_task(publish_status(app)),
+            asyncio.create_task(publish_pings(hub, settings.ws_ping_interval_s)),
+        ]
         logger.info("Server ready")
         try:
             yield
         finally:
             ingest.stop()
+            for task in background:
+                task.cancel()
+            await asyncio.gather(*background, return_exceptions=True)
 
 
 @router.get("/v1/status")
 async def get_status(request: Request) -> Status:
-    # shortcut: placeholder values until ingest and the assistant report real ones (VA-61).
-    return Status(
-        session_id=None,
-        stream_connected=request.app.state.stream_connected,
-        input_fps=0,
-        analysed_fps=0,
-        saved_per_min=0,
-        frames_in_db=0,
-        retention_min=request.app.state.settings.retention_minutes,
-        gpu_mem_mb=None,
-        last_answer_at=None,
-        groq_ok=False,
-        gemini_ok=False,
-    )
+    return await read_status(request.app)
 
 
 def error_response(status_code: int, code: ErrorCode, message: str) -> JSONResponse:
@@ -150,6 +186,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.add_exception_handler(Exception, handle_uncaught_error)
     app.include_router(router)
     app.include_router(sessions.router)
+    app.include_router(ws.router)
 
     # One mount per kind, not all of DATA_DIR, which also holds videos and model files.
     for kind in MEDIA_KINDS:
