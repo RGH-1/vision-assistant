@@ -3,6 +3,7 @@
 
 host: 0.0.0.0 # the phone reaches the server over the LAN (§8.1)
 port: 8000
+mediamtx_webrtc_port: 8889 # §6.2
 cors_origins: # the dashboard's Vite dev server
   - http://localhost:5173
   - http://127.0.0.1:5173

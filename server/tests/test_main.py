@@ -34,6 +34,7 @@ def settings(tmp_path: Path) -> Settings:
         retention_minutes=30,
         host="127.0.0.1",
         port=8000,
+        mediamtx_webrtc_port=8889,
         cors_origins=["http://localhost:5173"],
         clip_text_model="stub",
         ingest_stub_heartbeat_s=0.01,
