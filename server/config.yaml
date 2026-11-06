@@ -1,0 +1,12 @@
+# Tunable values, kept in git so changes show in the history (design §8.3).
+# Secrets and per-machine settings go in .env instead.
+
+host: 0.0.0.0 # the phone reaches the server over the LAN (§8.1)
+port: 8000
+mediamtx_webrtc_port: 8889 # §6.2
+cors_origins: # the dashboard's Vite dev server
+  - http://localhost:5173
+  - http://127.0.0.1:5173
+clip_text_model: clip-ViT-B-32-multilingual-v1 # §4
+ingest_no_frame_timeout_s: 3
+ingest_reconnect_delay_s: 0.25
