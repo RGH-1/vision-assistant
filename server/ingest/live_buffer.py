@@ -1,4 +1,4 @@
-"""Short-lived, thread-safe frame storage for questions about the current scene."""
+"""Thread-safe, short-lived frames for questions about the current scene."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ type LiveFrame = tuple[float, bytes, float, tuple[Detection, ...]]
 
 
 class LiveBuffer:
-    """Keep the latest ten JPEG frames shared between ingest and API threads (§5.3)."""
+    """The last ten sampled frames, guarded for ingest/web-route access (§5.3)."""
 
     def __init__(self) -> None:
         self._frames: deque[LiveFrame] = deque(maxlen=10)
@@ -23,21 +23,19 @@ class LiveBuffer:
 
     def add(
         self,
-        timestamp: float,
         frame: np.ndarray,
-        sharpness: float,
-        detections: Sequence[Detection],
+        captured_at: float,
+        detections: Sequence[Detection] = (),
     ) -> None:
-        """Resize and encode a sampled frame before adding it to the live window."""
-        height, width = frame.shape[:2]
-        resized = cv2.resize(
-            frame, (960, round(height * 960 / width)), interpolation=cv2.INTER_AREA
-        )
+        """Encode one sampled frame without blocking readers from a partial write."""
+        resized = self._resize(frame)
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
         ok, encoded = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ok:
             raise ValueError("could not encode live frame as JPEG")
         entry: LiveFrame = (
-            timestamp,
+            captured_at,
             encoded.tobytes(),
             sharpness,
             tuple(dict(detection) for detection in detections),
@@ -46,7 +44,7 @@ class LiveBuffer:
             self._frames.append(entry)
 
     def get_sharpest(self, n: int = 5) -> LiveFrame | None:
-        """Return the sharpest frame among the latest ``n`` frames for a now-question."""
+        """Return the sharpest of the latest ``n`` frames for a now-question."""
         if n <= 0:
             raise ValueError("n must be positive")
         with self._lock:
@@ -56,6 +54,11 @@ class LiveBuffer:
         # A tie favours the newest capture, which is better for a live answer.
         return max(reversed(candidates), key=lambda entry: entry[2])
 
+    def snapshot(self) -> list[LiveFrame]:
+        """Return a stable copy for API use without exposing the locked deque."""
+        with self._lock:
+            return list(self._frames)
+
     def clear(self) -> None:
         """Remove all in-memory frames when a session ends or is deleted (§7.5)."""
         with self._lock:
@@ -64,3 +67,10 @@ class LiveBuffer:
     def __len__(self) -> int:
         with self._lock:
             return len(self._frames)
+
+    @staticmethod
+    def _resize(frame: np.ndarray) -> np.ndarray:
+        height, width = frame.shape[:2]
+        if width <= 960:
+            return frame
+        return cv2.resize(frame, (960, round(height * 960 / width)), interpolation=cv2.INTER_AREA)

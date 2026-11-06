@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -17,6 +16,11 @@ from starlette.exceptions import HTTPException
 from server.common.db import create_web_pool
 from server.common.schemas import Error, ErrorCode, ErrorDetail, Status
 from server.events import EventHub
+
+from server.ingest.live_buffer import LiveBuffer
+from server.ingest.worker import IngestSource, IngestWorker
+
+from server.routes import sessions
 from server.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -35,16 +39,44 @@ def load_clip_text_encoder(model_name: str) -> Any:
     return SentenceTransformer(model_name, device="cpu")  # the GPU belongs to ingest (§5.3)
 
 
-def run_ingest_stub(stop: threading.Event, heartbeat_s: float) -> None:
-    # shortcut: stand-in for M2's server/ingest/worker.py, which replaces this once it exists.
-    while not stop.wait(heartbeat_s):
-        logger.info("ingest stub heartbeat")
+def create_ingest_worker(app: FastAPI) -> IngestWorker:
+    """Build the worker after the asyncio hub and live buffer exist (§5.3)."""
+    settings: Settings = app.state.settings
+
+    def connection_event(connected: bool) -> dict[str, Any]:
+        app.state.stream_connected = connected
+        return {
+            "type": "status",
+            "session_id": None,
+            "stream_connected": connected,
+            "input_fps": 0.0,
+            "analysed_fps": 0.0,
+            "saved_per_min": 0.0,
+            "frames_in_db": 0,
+            "retention_min": settings.retention_minutes,
+            "gpu_mem_mb": None,
+            "last_answer_at": None,
+            "groq_ok": False,
+            "gemini_ok": False,
+        }
+
+    return IngestWorker(
+        IngestSource(settings.rtsp_url),
+        app.state.live_buffer.add,
+        app.state.hub,
+        connection_event_factory=connection_event,
+        sample_hz=settings.sample_hz,
+        no_frame_timeout_s=settings.ingest_no_frame_timeout_s,
+        reconnect_delay_s=settings.ingest_reconnect_delay_s,
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     app.state.hub = EventHub(asyncio.get_running_loop())
+    app.state.live_buffer = LiveBuffer()
+    app.state.stream_connected = False
 
     async with create_web_pool() as pool:
         app.state.pool = pool
@@ -53,20 +85,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             load_clip_text_encoder, settings.clip_text_model
         )
 
-        stop = threading.Event()
-        ingest = threading.Thread(
-            target=run_ingest_stub,
-            args=(stop, settings.ingest_stub_heartbeat_s),
-            name="ingest",
-            daemon=True,
-        )
+        ingest = create_ingest_worker(app)
+        app.state.ingest = ingest
         ingest.start()
         logger.info("Server ready")
         try:
             yield
         finally:
-            stop.set()
-            ingest.join()
+            ingest.stop()
 
 
 @router.get("/v1/status")
@@ -74,7 +100,7 @@ async def get_status(request: Request) -> Status:
     # shortcut: placeholder values until ingest and the assistant report real ones (VA-61).
     return Status(
         session_id=None,
-        stream_connected=False,
+        stream_connected=request.app.state.stream_connected,
         input_fps=0,
         analysed_fps=0,
         saved_per_min=0,
@@ -127,6 +153,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.add_exception_handler(HTTPException, handle_http_error)
     app.add_exception_handler(Exception, handle_uncaught_error)
     app.include_router(router)
+    app.include_router(sessions.router)
 
     # One mount per kind, not all of DATA_DIR, which also holds videos and model files.
     for kind in MEDIA_KINDS:
