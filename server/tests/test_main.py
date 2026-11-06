@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server import main
-from server.common.schemas import ErrorResponse, Status
+from server.common.schemas import Error, Status
 from server.events import EventHub
 from server.main import create_app
 from server.settings import ROOT, Settings, load_env_file
@@ -59,9 +59,9 @@ def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         yield test_client
 
 
-def assert_error(response, status_code: int, code: str) -> ErrorResponse:
+def assert_error(response, status_code: int, code: str) -> Error:
     assert response.status_code == status_code
-    body = ErrorResponse.model_validate(response.json())
+    body = Error.model_validate(response.json())
     assert body.error.code == code
     assert body.error.speak  # the phone always has something to say
     return body
