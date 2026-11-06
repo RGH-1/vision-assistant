@@ -14,12 +14,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
 from server.common.db import create_web_pool
+from server.common.embeddings import ClipTextEncoder
 from server.common.schemas import Error, ErrorCode, ErrorDetail, Status
 from server.events import EventHub
-
 from server.ingest.live_buffer import LiveBuffer
 from server.ingest.worker import IngestSource, IngestWorker
-
 from server.routes import sessions
 from server.settings import Settings
 
@@ -33,10 +32,7 @@ router = APIRouter()
 
 
 def load_clip_text_encoder(model_name: str) -> Any:
-    # Imported here because it pulls in torch, which takes long and isn't needed by the tests.
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer(model_name, device="cpu")  # the GPU belongs to ingest (§5.3)
+    return ClipTextEncoder(model_name)  # the GPU belongs to ingest (§5.3)
 
 
 def create_ingest_worker(app: FastAPI) -> IngestWorker:
