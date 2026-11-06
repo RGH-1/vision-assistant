@@ -2,10 +2,8 @@
 
 import asyncio
 import json
-import logging
 import os
 import threading
-import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -15,6 +13,7 @@ from fastapi.testclient import TestClient
 from server import main
 from server.common.schemas import Error, Status
 from server.events import EventHub
+from server.ingest.live_buffer import LiveBuffer
 from server.main import create_app
 from server.settings import ROOT, Settings, load_env_file
 
@@ -27,6 +26,18 @@ class FakePool:
         return None
 
 
+class FakeIngestWorker:
+    def __init__(self) -> None:
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(
@@ -36,7 +47,10 @@ def settings(tmp_path: Path) -> Settings:
         port=8000,
         cors_origins=["http://localhost:5173"],
         clip_text_model="stub",
-        ingest_stub_heartbeat_s=0.01,
+        rtsp_url="rtsp://example.invalid/phone",
+        sample_hz=5,
+        ingest_no_frame_timeout_s=3,
+        ingest_reconnect_delay_s=0.01,
     )
 
 
@@ -44,7 +58,16 @@ def settings(tmp_path: Path) -> Settings:
 def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setattr(main, "create_web_pool", FakePool)
     monkeypatch.setattr(main, "load_clip_text_encoder", lambda _: "clip-stub")
+    created_workers: list[FakeIngestWorker] = []
+
+    def create_worker(_: object) -> "FakeIngestWorker":
+        worker = FakeIngestWorker()
+        created_workers.append(worker)
+        return worker
+
+    monkeypatch.setattr(main, "create_ingest_worker", create_worker)
     app = create_app(settings)
+    app.state.created_workers = created_workers
 
     @app.get("/test/needs-int")
     async def needs_int(number: int) -> int:
@@ -77,23 +100,16 @@ def test_status_has_exactly_the_contract_fields(client: TestClient) -> None:
     assert response.json()["retention_min"] == 30
 
 
-def test_startup_loads_everything_and_shutdown_stops_ingest(
-    client: TestClient, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.INFO, logger="server.main")
+def test_startup_loads_everything_and_shutdown_stops_ingest(client: TestClient) -> None:
     state = client.app.state
     assert state.clip_text == "clip-stub"
     assert isinstance(state.pool, FakePool)
     assert isinstance(state.hub, EventHub)
-
-    deadline = time.monotonic() + 2
-    while "ingest stub heartbeat" not in caplog.text and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert "ingest stub heartbeat" in caplog.text
-    assert any(thread.name == "ingest" for thread in threading.enumerate())
+    assert isinstance(state.live_buffer, LiveBuffer)
+    assert state.created_workers[0].started
 
     client.__exit__(None, None, None)
-    assert not any(thread.name == "ingest" for thread in threading.enumerate())
+    assert state.created_workers[0].stopped
 
 
 def test_hub_delivers_on_the_loop_thread_when_published_from_another_thread() -> None:
