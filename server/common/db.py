@@ -1,6 +1,7 @@
 
 
 import os
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +11,8 @@ from pgvector.psycopg import register_vector, register_vector_async
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
+
+from server.common.text_norm import normalize_text
 
 
 
@@ -302,3 +305,156 @@ def insert_alert(
     result = conn.execute(query, params).fetchone()
 
     return result["id"]
+
+
+def list_dashboard_frames(
+    conn: psycopg.Connection,
+    session_id: UUID,
+    *,
+    captured_from: datetime | None = None,
+    captured_to: datetime | None = None,
+    label: str | None = None,
+    text: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Return one page of timeline frames with optional object and OCR-trigram filters."""
+    _validate_page(limit, offset)
+    text_query = normalize_text(text) if text else None
+    query = """
+        SELECT
+            f.id AS frame_id,
+            f.captured_at,
+            f.thumb_path,
+            COALESCE(array_agg(DISTINCT d.label) FILTER (WHERE d.label IS NOT NULL), '{}') AS labels,
+            COALESCE(NULLIF(left(string_agg(DISTINCT o.text, ' '), 160), ''), f.scene_text) AS text_preview,
+            f.keep_reason
+        FROM frames AS f
+        LEFT JOIN detections AS d ON d.frame_id = f.id
+        LEFT JOIN ocr_texts AS o ON o.frame_id = f.id
+        WHERE f.session_id = %(session_id)s
+          AND (
+              %(captured_from)s::timestamptz IS NULL
+              OR f.captured_at >= %(captured_from)s::timestamptz
+          )
+          AND (
+              %(captured_to)s::timestamptz IS NULL
+              OR f.captured_at <= %(captured_to)s::timestamptz
+          )
+          AND (
+              %(label)s::text IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM detections AS label_detection
+                  WHERE label_detection.frame_id = f.id
+                    AND label_detection.label = %(label)s::text
+              )
+          )
+          AND (
+              %(text)s::text IS NULL
+              OR EXISTS (
+                  SELECT 1 FROM ocr_texts AS search_ocr
+                  WHERE search_ocr.frame_id = f.id
+                    AND similarity(search_ocr.text_norm, %(text)s::text) >= 0.2
+              )
+          )
+        GROUP BY f.id
+        ORDER BY f.captured_at DESC, f.id DESC
+        LIMIT %(limit)s OFFSET %(offset)s
+    """
+    return conn.execute(
+        query,
+        {
+            "session_id": session_id,
+            "captured_from": captured_from,
+            "captured_to": captured_to,
+            "label": label,
+            "text": text_query,
+            "limit": limit,
+            "offset": offset,
+        },
+    ).fetchall()
+
+
+def get_dashboard_frame_detail(conn: psycopg.Connection, frame_id: int) -> dict[str, Any] | None:
+    """Return one frame plus its detections, OCR lines and stored quality values."""
+    frame = conn.execute("SELECT * FROM frames WHERE id = %s", (frame_id,)).fetchone()
+    if frame is None:
+        return None
+    frame["detections"] = conn.execute(
+        """
+        SELECT label, confidence, bbox, area_ratio, position
+        FROM detections WHERE frame_id = %s ORDER BY id
+        """,
+        (frame_id,),
+    ).fetchall()
+    frame["ocr"] = conn.execute(
+        """
+        SELECT text, confidence, bbox, from_crop
+        FROM ocr_texts WHERE frame_id = %s ORDER BY id
+        """,
+        (frame_id,),
+    ).fetchall()
+    return frame
+
+
+def list_questions_with_evidence(
+    conn: psycopg.Connection, session_id: UUID, *, limit: int = 50
+) -> list[dict[str, Any]]:
+    """Return newest questions, grouping their saved-frame evidence in Python."""
+    _validate_page(limit, 0)
+    questions = conn.execute(
+        """
+        SELECT * FROM questions WHERE session_id = %s
+        ORDER BY asked_at DESC, id DESC LIMIT %s
+        """,
+        (session_id, limit),
+    ).fetchall()
+    if not questions:
+        return []
+    question_ids = [question["id"] for question in questions]
+    evidence = conn.execute(
+        """
+        SELECT
+            evidence.question_id, evidence.frame_id, evidence.rank, evidence.score,
+            evidence.parts, frame.thumb_path
+        FROM question_evidence AS evidence
+        JOIN frames AS frame ON frame.id = evidence.frame_id
+        WHERE evidence.question_id = ANY(%s)
+        ORDER BY evidence.question_id, evidence.rank
+        """,
+        (question_ids,),
+    ).fetchall()
+    evidence_by_question: dict[int, list[dict[str, Any]]] = {question_id: [] for question_id in question_ids}
+    for item in evidence:
+        evidence_by_question[item["question_id"]].append(item)
+    for question in questions:
+        question["evidence"] = evidence_by_question[question["id"]]
+    return questions
+
+
+def list_dashboard_alerts(
+    conn: psycopg.Connection, session_id: UUID, *, limit: int = 50
+) -> list[dict[str, Any]]:
+    """Return newest alerts with an optional saved-frame thumbnail path."""
+    _validate_page(limit, 0)
+    return conn.execute(
+        """
+        SELECT
+            alert.id AS alert_id, alert.kind, alert.message, alert.lang, alert.frame_id,
+            alert.created_at, frame.thumb_path
+        FROM alerts AS alert
+        LEFT JOIN frames AS frame ON frame.id = alert.frame_id
+        WHERE alert.session_id = %s
+        ORDER BY alert.created_at DESC, alert.id DESC
+        LIMIT %s
+        """,
+        (session_id, limit),
+    ).fetchall()
+
+
+def _validate_page(limit: int, offset: int) -> None:
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    if offset < 0:
+        raise ValueError("offset cannot be negative")
