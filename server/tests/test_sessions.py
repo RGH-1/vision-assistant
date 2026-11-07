@@ -47,6 +47,10 @@ def client(data_dir: Path) -> Iterator[TestClient]:
         status_interval_s=60,
         ws_ping_interval_s=60,
         ws_send_timeout_s=1,
+        stt_model="stub",
+        stt_timeout_s=1,
+        stt_min_avg_logprob=-1.0,
+        stt_max_no_speech_prob=0.6,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
     options = {"loop_factory": asyncio.SelectorEventLoop}

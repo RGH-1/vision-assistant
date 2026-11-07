@@ -28,6 +28,10 @@ class Settings(BaseModel):
     status_interval_s: float
     ws_ping_interval_s: float
     ws_send_timeout_s: float
+    stt_model: str
+    stt_timeout_s: float
+    stt_min_avg_logprob: float
+    stt_max_no_speech_prob: float
 
 
 def load_env_file(path: Path) -> None:
@@ -52,5 +56,6 @@ def load_settings() -> Settings:
         retention_minutes=int(os.environ["RETENTION_MINUTES"]),
         rtsp_url=os.environ.get("RTSP_URL", "rtsp://localhost:8554/phone"),
         sample_hz=float(os.environ.get("SAMPLE_HZ", "5")),
+        stt_model=os.environ["STT_MODEL"],
         **config,
     )

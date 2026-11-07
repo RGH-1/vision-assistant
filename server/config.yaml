@@ -13,6 +13,9 @@ ingest_reconnect_delay_s: 0.25
 status_interval_s: 2 # §8.2
 ws_ping_interval_s: 15 # §8.2
 ws_send_timeout_s: 2 # a client this slow is dropped, and it reconnects
+stt_timeout_s: 15 # §6.4
+stt_min_avg_logprob: -1.0 # Whisper's own default; lower means very low confidence (§6.5.1)
+stt_max_no_speech_prob: 0.6 # Whisper's own default; higher means probably not speech
 
 frame_selection:
   analysis_width: 640
