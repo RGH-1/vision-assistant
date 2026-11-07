@@ -1,7 +1,9 @@
 """VA-63 checks. Runs the real Groq library, with only the network replaced."""
 
 import asyncio
+import wave
 from functools import partial
+from io import BytesIO
 from types import SimpleNamespace
 from typing import get_args
 
@@ -19,9 +21,19 @@ SETTINGS = SimpleNamespace(
     )
 GOOD = {"avg_logprob": -0.2}
 
+def silent_wav(seconds: float = 1, rate: int = 16000, channels: int = 1) -> bytes:
+    file = BytesIO()
+    with wave.open(file, "wb") as recording:
+        recording.setframerate(rate)
+        recording.setnchannels(channels)
+        recording.setsampwidth(2)
+        recording.writeframes(bytes(int(seconds * rate) * channels * 2))
+    return file.getvalue()
+
 
 def fake_groq(monkeypatch: pytest.MonkeyPatch, status: int, body: dict) -> list[httpx.Request]:
     """Answer every Groq request with this response, and return the requests that were made."""
+    monkeypatch.setattr(stt, "has_speech", lambda audio: True)
     requests: list[httpx.Request] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -98,6 +110,30 @@ def test_groq_errors_are_raised_without_retrying(
         asyncio.run(stt.transcribe(b"audio", "en", SETTINGS))
 
     assert len(requests) == 1
+
+
+def test_audio_without_speech_is_not_sent_to_groq(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests = fake_groq(monkeypatch, 200, {"text": "Thank you.", "segments": [GOOD]})
+    monkeypatch.setattr(stt, "has_speech", lambda audio: False)
+
+    transcript = asyncio.run(stt.transcribe(b"audio", "en", SETTINGS))
+
+    assert transcript.text == ""
+    assert transcript.engine is None
+    assert not requests
+
+
+@pytest.mark.parametrize("seconds", [0, 1])
+def test_silence_has_no_speech(seconds: int) -> None:
+    assert not stt.has_speech(silent_wav(seconds))
+
+
+@pytest.mark.parametrize(
+    "audio", [b"not a wav", b"", silent_wav(rate=48000), silent_wav(channels=2)]
+)
+def test_audio_outside_the_upload_format_is_rejected(audio: bytes) -> None:
+    with pytest.raises(ValueError):
+        stt.has_speech(audio)
 
 
 def test_every_language_has_a_didnt_catch_message() -> None:
