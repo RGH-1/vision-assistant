@@ -15,10 +15,9 @@ from server.common.schemas import Lang
 SETTINGS = SimpleNamespace(
     stt_model="test-model",
     stt_timeout_s=1,
-    stt_min_avg_logprob=-1.0,
-    stt_max_no_speech_prob=0.6,
-)
-GOOD = {"avg_logprob": -0.2, "no_speech_prob": 0.01}
+    stt_min_avg_logprob=-0.5,
+    )
+GOOD = {"avg_logprob": -0.2}
 
 
 def fake_groq(monkeypatch: pytest.MonkeyPatch, status: int, body: dict) -> list[httpx.Request]:
@@ -60,8 +59,7 @@ def test_sends_the_design_settings_and_returns_the_text(monkeypatch: pytest.Monk
     [
         ("", []),
         ("...  !?", [GOOD]),
-        ("mumble", [{"avg_logprob": -1.5, "no_speech_prob": 0.01}]),
-        ("Thank you.", [{"avg_logprob": -0.2, "no_speech_prob": 0.9}]),
+        ("mumble", [{"avg_logprob": -0.74}]),
     ],
 )
 def test_empty_or_low_confidence_transcripts_are_not_understood(
@@ -73,7 +71,7 @@ def test_empty_or_low_confidence_transcripts_are_not_understood(
 
 
 def test_one_good_segment_is_enough(monkeypatch: pytest.MonkeyPatch) -> None:
-    bad = {"avg_logprob": -2.0, "no_speech_prob": 0.9}
+    bad = {"avg_logprob": -2.0}
     fake_groq(monkeypatch, 200, {"text": "Where is the door?", "segments": [bad, GOOD]})
 
     assert asyncio.run(stt.transcribe(b"audio", "en", SETTINGS)).text == "Where is the door?"

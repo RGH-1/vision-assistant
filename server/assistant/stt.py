@@ -26,11 +26,7 @@ class Transcript:
 def is_understood(text: str, segments: list[dict], settings: Settings) -> bool:
     if not any(character.isalpha() for character in text):
         return False
-    return any(
-        segment["avg_logprob"] >= settings.stt_min_avg_logprob
-        and segment["no_speech_prob"] <= settings.stt_max_no_speech_prob
-        for segment in segments
-    )
+    return any(segment["avg_logprob"] >= settings.stt_min_avg_logprob for segment in segments)
 
 
 async def transcribe(audio: bytes, lang: str, settings: Settings) -> Transcript:
