@@ -139,6 +139,14 @@ def test_frame_detail_includes_quality_detections_and_ocr(dashboard_data) -> Non
     assert detail["ocr"] == [
         {"text": "Room 204", "confidence": 0.9, "bbox": [1.0, 2.0, 3.0, 4.0], "from_crop": False}
     ]
+
+    door_detail = get_dashboard_frame_detail(connection, frame_ids[1])
+
+    assert door_detail is not None
+    assert any(
+        detection["label"] == "door"
+        for detection in door_detail["detections"]
+    )
     assert get_dashboard_frame_detail(connection, -1) is None
 
 
@@ -178,6 +186,8 @@ def test_dashboard_queries_are_under_100ms_for_a_30_minute_session(dashboard_dat
         "detail": lambda: get_dashboard_frame_detail(connection, frame_ids[0]),
         "questions": lambda: list_questions_with_evidence(connection, session_id),
         "alerts": lambda: list_dashboard_alerts(connection, session_id),
+        "label_filter": lambda: list_dashboard_frames(connection, session_id, label="door", limit=100),
+        "ocr_trigram": lambda: list_dashboard_frames(connection, session_id, text="r00m 204", limit=100),
     }
     for name, query in queries.items():
         started_at = perf_counter()
