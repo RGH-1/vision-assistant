@@ -75,3 +75,38 @@ def test_clear_removes_all_live_frames() -> None:
 def test_get_sharpest_rejects_non_positive_window() -> None:
     with pytest.raises(ValueError, match="positive"):
         LiveBuffer().get_sharpest(0)
+
+
+
+def test_get_sharpest_selects_from_last_five() -> None:
+    buffer = LiveBuffer()
+
+    # Create a plain black image with very low sharpness.
+    flat = np.zeros((100, 100, 3), dtype=np.uint8)
+
+    # Create a checkerboard image with high sharpness.
+    pattern = np.indices((100, 100)).sum(axis=0) % 2
+
+    sharp = np.repeat(
+        (pattern * 255).astype(np.uint8)[:, :, None],
+        3,
+        axis=2,
+    )
+
+    # Add two old sharp frames.
+    buffer.add(sharp, 0.0)
+    buffer.add(sharp, 1.0)
+
+    # Add the five most recent frames.
+    buffer.add(flat, 2.0)
+    buffer.add(flat, 3.0)
+    buffer.add(sharp, 4.0)
+    buffer.add(flat, 5.0)
+    buffer.add(flat, 6.0)
+
+    # Only the last five frames should be considered.
+    result = buffer.get_sharpest(n=5)
+
+    assert result is not None
+    assert result[0] == 4.0
+    assert result[2] > 0
