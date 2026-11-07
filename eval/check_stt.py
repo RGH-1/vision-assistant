@@ -1,6 +1,6 @@
 """VA-63 check: transcribe recorded questions with real Groq, to compare by ear with what was said.
 
-Put WAV files in data/stt_check/, named by language: en_1.wav ... en_5.wav, ar_1.wav ... ar_5.wav.
+Put 16 kHz mono WAV files in data/stt_check/, named by language: en_1.wav ... ar_5.wav.
 
 Run from the repo root:
   uv run python -m eval.check_stt

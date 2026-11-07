@@ -31,7 +31,6 @@ class Settings(BaseModel):
     stt_model: str
     stt_timeout_s: float
     stt_min_avg_logprob: float
-    stt_max_no_speech_prob: float
 
 
 def load_env_file(path: Path) -> None:

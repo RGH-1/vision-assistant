@@ -68,7 +68,6 @@ def settings(tmp_path: Path) -> Settings:
         stt_model="stub",
         stt_timeout_s=1,
         stt_min_avg_logprob=-1.0,
-        stt_max_no_speech_prob=0.6,
         rtsp_url="rtsp://example.invalid/phone",
         sample_hz=5,
         ingest_no_frame_timeout_s=3,

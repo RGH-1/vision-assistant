@@ -1,7 +1,9 @@
 """VA-63 checks. Runs the real Groq library, with only the network replaced."""
 
 import asyncio
+import wave
 from functools import partial
+from io import BytesIO
 from types import SimpleNamespace
 from typing import get_args
 
@@ -15,14 +17,23 @@ from server.common.schemas import Lang
 SETTINGS = SimpleNamespace(
     stt_model="test-model",
     stt_timeout_s=1,
-    stt_min_avg_logprob=-1.0,
-    stt_max_no_speech_prob=0.6,
-)
-GOOD = {"avg_logprob": -0.2, "no_speech_prob": 0.01}
+    stt_min_avg_logprob=-0.5,
+    )
+GOOD = {"avg_logprob": -0.2}
+
+def silent_wav(seconds: float = 1, rate: int = 16000, channels: int = 1) -> bytes:
+    file = BytesIO()
+    with wave.open(file, "wb") as recording:
+        recording.setframerate(rate)
+        recording.setnchannels(channels)
+        recording.setsampwidth(2)
+        recording.writeframes(bytes(int(seconds * rate) * channels * 2))
+    return file.getvalue()
 
 
 def fake_groq(monkeypatch: pytest.MonkeyPatch, status: int, body: dict) -> list[httpx.Request]:
     """Answer every Groq request with this response, and return the requests that were made."""
+    monkeypatch.setattr(stt, "has_speech", lambda audio: True)
     requests: list[httpx.Request] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -60,8 +71,7 @@ def test_sends_the_design_settings_and_returns_the_text(monkeypatch: pytest.Monk
     [
         ("", []),
         ("...  !?", [GOOD]),
-        ("mumble", [{"avg_logprob": -1.5, "no_speech_prob": 0.01}]),
-        ("Thank you.", [{"avg_logprob": -0.2, "no_speech_prob": 0.9}]),
+        ("mumble", [{"avg_logprob": -0.74}]),
     ],
 )
 def test_empty_or_low_confidence_transcripts_are_not_understood(
@@ -73,7 +83,7 @@ def test_empty_or_low_confidence_transcripts_are_not_understood(
 
 
 def test_one_good_segment_is_enough(monkeypatch: pytest.MonkeyPatch) -> None:
-    bad = {"avg_logprob": -2.0, "no_speech_prob": 0.9}
+    bad = {"avg_logprob": -2.0}
     fake_groq(monkeypatch, 200, {"text": "Where is the door?", "segments": [bad, GOOD]})
 
     assert asyncio.run(stt.transcribe(b"audio", "en", SETTINGS)).text == "Where is the door?"
@@ -100,6 +110,30 @@ def test_groq_errors_are_raised_without_retrying(
         asyncio.run(stt.transcribe(b"audio", "en", SETTINGS))
 
     assert len(requests) == 1
+
+
+def test_audio_without_speech_is_not_sent_to_groq(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests = fake_groq(monkeypatch, 200, {"text": "Thank you.", "segments": [GOOD]})
+    monkeypatch.setattr(stt, "has_speech", lambda audio: False)
+
+    transcript = asyncio.run(stt.transcribe(b"audio", "en", SETTINGS))
+
+    assert transcript.text == ""
+    assert transcript.engine is None
+    assert not requests
+
+
+@pytest.mark.parametrize("seconds", [0, 1])
+def test_silence_has_no_speech(seconds: int) -> None:
+    assert not stt.has_speech(silent_wav(seconds))
+
+
+@pytest.mark.parametrize(
+    "audio", [b"not a wav", b"", silent_wav(rate=48000), silent_wav(channels=2)]
+)
+def test_audio_outside_the_upload_format_is_rejected(audio: bytes) -> None:
+    with pytest.raises(ValueError):
+        stt.has_speech(audio)
 
 
 def test_every_language_has_a_didnt_catch_message() -> None:
