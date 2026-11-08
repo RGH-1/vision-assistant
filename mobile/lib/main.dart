@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   runApp(const MyApp());
 }
 
@@ -16,6 +22,7 @@ class MyApp extends StatelessWidget {
       title: 'Vision Assistant WHIP',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
       ),
       home: const MyHomePage(title: 'WHIP Camera Streamer'),
     );
@@ -74,9 +81,7 @@ class _MyHomePageState extends State<MyHomePage> {
         'video': {
           'width': {'exact': 640}, // 640x480 is the sweet spot for stability
           'height': {'exact': 480},
-          'frameRate': {
-            'exact': 20,
-          }, // 20 fps prevents high CPU load while looking smooth
+          'frameRate': {'exact': 20},
           'facingMode': 'environment',
         },
       };
