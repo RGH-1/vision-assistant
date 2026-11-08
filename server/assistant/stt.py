@@ -14,6 +14,8 @@ from groq import AsyncGroq
 from server.common.schemas import Lang
 from server.settings import Settings
 
+MAX_AUDIO_S = 10 # the upload limit in the contract (§8.1)
+
 DIDNT_CATCH: dict[Lang, str] = {
     "en": "Sorry, I didn't catch that. Please try again.",
     "ar": "عذرًا، لم أسمع ذلك جيدًا. من فضلك حاول مرة أخرى.",
@@ -42,6 +44,8 @@ def has_speech(audio: bytes) -> bool:
         raise ValueError(f"Not a valid WAV file: {error}") from error
     if audio_format != (16000, 1, 2):
         raise ValueError(f"Expected 16 kHz mono 16-bit WAV, got {audio_format}")
+    if len(frames) > MAX_AUDIO_S * 16000 * 2:
+        raise ValueError(f"Audio is longer than {MAX_AUDIO_S} s")
 
     samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768
     return bool(get_speech_timestamps(samples, VadOptions()))
