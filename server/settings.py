@@ -31,6 +31,9 @@ class Settings(BaseModel):
     stt_model: str
     stt_timeout_s: float
     stt_min_avg_logprob: float
+    gemini_model: str
+    gemini_timeout_s: float
+    gemini_temperature: float
 
 
 def load_env_file(path: Path) -> None:
@@ -56,5 +59,6 @@ def load_settings() -> Settings:
         rtsp_url=os.environ.get("RTSP_URL", "rtsp://localhost:8554/phone"),
         sample_hz=float(os.environ.get("SAMPLE_HZ", "5")),
         stt_model=os.environ["STT_MODEL"],
+        gemini_model=os.environ["GEMINI_MODEL"],
         **config,
     )
