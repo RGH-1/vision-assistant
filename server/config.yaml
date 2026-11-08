@@ -14,7 +14,7 @@ status_interval_s: 2 # §8.2
 ws_ping_interval_s: 15 # §8.2
 ws_send_timeout_s: 2 # a client this slow is dropped, and it reconnects
 stt_timeout_s: 15 # §6.4
-stt_min_avg_logprob: -0.5 # measured: clear speech -0.06 to -0.20, muffled -0.74 (§6.5.1)
+stt_min_avg_logprob: -0.65 # measured: clear speech -0.06 to -0.20, muffled -0.74 (§6.5.1)
 gemini_timeout_s: 30 # §6.4
 gemini_temperature: 0.2 # §6.5.4
 

@@ -14,7 +14,7 @@ from groq import AsyncGroq
 from server.common.schemas import Lang
 from server.settings import Settings
 
-MAX_AUDIO_S = 10 # the upload limit in the contract (§8.1)
+MAX_AUDIO_S = 10  # the upload limit in the contract (§8.1)
 
 DIDNT_CATCH: dict[Lang, str] = {
     "en": "Sorry, I didn't catch that. Please try again.",
