@@ -40,7 +40,7 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   // Routes through FastAPI proxy on port 8000
-  final String whipEndpoint = "http://192.168.8.107:8000/whip/mystream";
+  final String whipEndpoint = "http://192.168.8.111:8889/mystream/whip";
 
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
