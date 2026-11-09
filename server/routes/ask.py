@@ -113,6 +113,31 @@ async def answer_live_scene(
         )
         question_id = (await cursor.fetchone())["id"]
 
+    # Out here so the row is committed before the dashboard hears about it.
+    app.state.hub.publish(
+        {
+            "type": "query_answered",
+            "question_id": question_id,
+            "session_id": session_id,
+            "asked_at": asked_at,
+            "input_mode": input_mode,
+            "stt_engine": stt_engine,
+            "transcript": transcript,
+            "lang": lang,
+            "intent": "LIVE_SCENE",
+            "t_from": None,
+            "t_to": None,
+            "answer": reply.answer,
+            "confidence": reply.confidence,
+            "abstained": abstained,
+            "safety_rewrite": False,  # nothing rewrites answers until the safety filter (VA-73)
+            "model": model,
+            "timings_ms": timings,
+            # shortcut: a live frame isn't stored, so it can't be evidence; VA-70 adds stored ones.
+            "evidence": [],
+        }
+    )
+
     return AskResponse(
         question_id=question_id,
         transcript=transcript,
