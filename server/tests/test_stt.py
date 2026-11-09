@@ -18,8 +18,9 @@ SETTINGS = SimpleNamespace(
     stt_model="test-model",
     stt_timeout_s=1,
     stt_min_avg_logprob=-0.5,
-    )
+)
 GOOD = {"avg_logprob": -0.2}
+
 
 def silent_wav(seconds: float = 1, rate: int = 16000, channels: int = 1) -> bytes:
     file = BytesIO()
@@ -123,13 +124,13 @@ def test_audio_without_speech_is_not_sent_to_groq(monkeypatch: pytest.MonkeyPatc
     assert not requests
 
 
-@pytest.mark.parametrize("seconds", [0, 1])
+@pytest.mark.parametrize("seconds", [0, 1, 10])
 def test_silence_has_no_speech(seconds: int) -> None:
     assert not stt.has_speech(silent_wav(seconds))
 
 
 @pytest.mark.parametrize(
-    "audio", [b"not a wav", b"", silent_wav(rate=48000), silent_wav(channels=2)]
+    "audio", [b"not a wav", b"", silent_wav(rate=48000), silent_wav(channels=2), silent_wav(10.1)]
 )
 def test_audio_outside_the_upload_format_is_rejected(audio: bytes) -> None:
     with pytest.raises(ValueError):
