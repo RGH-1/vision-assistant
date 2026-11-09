@@ -4,7 +4,7 @@ import asyncio
 import time
 from collections.abc import Iterator
 from typing import Any, get_args
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import groq
 import httpx
@@ -16,7 +16,7 @@ from psycopg import Connection
 from server import main
 from server.assistant import gemini, stt
 from server.common.db import open_ingest_connection
-from server.common.schemas import AskResponse, Error, Lang
+from server.common.schemas import AskResponse, Error, Lang, QueryAnsweredMessage
 from server.main import create_app
 from server.routes.ask import CANT_SEE, WENT_WRONG
 from server.settings import Settings
@@ -180,6 +180,46 @@ def test_voice_question_is_transcribed_then_answered(
     assert gemini_calls[0]["question"] == QUESTION
     [row] = saved_questions(db, session_id)
     assert (row["input_mode"], row["stt_engine"]) == ("voice", "groq")
+
+
+def test_answered_question_reaches_the_dashboard(
+    client: TestClient,
+    db: Connection,
+    session_id: str,
+    gemini_calls: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_transcribe(monkeypatch, stt.Transcript(text=QUESTION, engine="groq", time_ms=480.0))
+
+    with client.websocket_connect("/v1/ws/dashboard") as dashboard:
+        dashboard.send_json({"type": "ping"})
+        assert dashboard.receive_json() == {"type": "pong"}  # the server has registered this client
+
+        assert ask_by_voice(client, session_id).status_code == 200
+        client.app.state.hub.publish({"type": "ping"})  # so a missing event fails, not hangs
+        event = dashboard.receive_json()
+
+    assert event["type"] == "query_answered"
+    [row] = saved_questions(db, session_id)
+    assert QueryAnsweredMessage.model_validate(event).model_dump(exclude={"type"}) == {
+        "question_id": row["id"],
+        "session_id": UUID(session_id),
+        "asked_at": row["asked_at"],
+        "input_mode": "voice",
+        "stt_engine": "groq",
+        "transcript": QUESTION,
+        "lang": "en",
+        "intent": "LIVE_SCENE",
+        "t_from": None,
+        "t_to": None,
+        "answer": REPLY.answer,
+        "confidence": "high",
+        "abstained": False,
+        "safety_rewrite": False,
+        "model": "test-gemini",
+        "timings_ms": row["timings_ms"],
+        "evidence": [],
+    }
 
 
 def test_low_confidence_counts_as_abstained(
