@@ -44,3 +44,47 @@ frame_novelty:
   new_distance: 12
   duplicate_distance: 5
   heartbeat_seconds: 10
+object_detection:
+  model: yoloe-26s-seg.pt
+  fallback_model: yoloe-11s-seg.pt
+  confidence_min: 0.35
+  image_size: 640
+  classes:
+    - person
+    - door
+    - wooden door
+    - stairs
+    - wooden stairs
+    - elevator
+    - escalator
+    - chair
+    - table
+    - desk
+    - bench
+    - sofa
+    - toilet
+    - sink
+    - trash can
+    - sign
+    - exit sign
+    - room number sign
+    - traffic light
+    - car
+    - bus
+    - bicycle
+    - motorcycle
+    - pole
+    - window
+    - laptop
+    - phone
+    - bottle
+    - cup
+    - backpack
+    - bag
+    - book
+    - keys
+    - wallet
+    - umbrella
+    - dog
+    - cat
+    - plant
