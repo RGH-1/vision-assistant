@@ -39,3 +39,8 @@ frame_enhancement:
   clahe_tile_size: 8
   unsharp_sigma: 1.0
   unsharp_amount: 1.0
+
+frame_novelty:
+  new_distance: 12
+  duplicate_distance: 5
+  heartbeat_seconds: 10
