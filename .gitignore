@@ -14,6 +14,8 @@ data/*
 *.safetensors
 *.bin
 *.gguf
+mobileclip2_b.ts
+.mobileclip2_b.ts.*.part
 
 # --- Python ---
 __pycache__/

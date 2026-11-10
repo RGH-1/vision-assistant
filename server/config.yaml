@@ -39,3 +39,46 @@ frame_enhancement:
   clahe_tile_size: 8
   unsharp_sigma: 1.0
   unsharp_amount: 1.0
+
+object_detection:
+  model: yoloe-26s-seg.pt
+  fallback_model: yoloe-11s-seg.pt
+  confidence_min: 0.35
+  image_size: 640
+  classes:
+    - person
+    - door
+    - stairs
+    - elevator
+    - escalator
+    - chair
+    - table
+    - desk
+    - bench
+    - sofa
+    - toilet
+    - sink
+    - trash can
+    - sign
+    - exit sign
+    - room number sign
+    - traffic light
+    - car
+    - bus
+    - bicycle
+    - motorcycle
+    - pole
+    - window
+    - laptop
+    - phone
+    - bottle
+    - cup
+    - backpack
+    - bag
+    - book
+    - keys
+    - wallet
+    - umbrella
+    - dog
+    - cat
+    - plant
