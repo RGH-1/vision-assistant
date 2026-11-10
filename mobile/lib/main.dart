@@ -4,6 +4,8 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 
+import 'services/session_websocket_service.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([
@@ -19,12 +21,12 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Vision Assistant WHIP',
+      title: 'Vision Assistant WHIP & WS',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'WHIP Camera Streamer'),
+      home: const MyHomePage(title: 'Vision Assistant Stream & WS'),
     );
   }
 }
@@ -39,7 +41,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  // Routes through FastAPI proxy on port 8000
+  // Routes through FastAPI proxy on port 8889
   final String whipEndpoint = "http://192.168.8.111:8889/mystream/whip";
 
   RTCPeerConnection? _peerConnection;
@@ -48,10 +50,17 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isStreaming = false;
   String _statusMessage = "Ready to stream";
 
+  // VA-18: Session & WebSocket Service instance
+  late final SessionWebSocketService _wsService;
+  String _wsStatusText = "Initializing session...";
+  final List<String> _eventLogs = [];
+
   @override
   void initState() {
     super.initState();
+    _wsService = SessionWebSocketService();
     _initializeCamera();
+    _bootstrapAppSession();
   }
 
   Future<void> _initializeCamera() async {
@@ -90,11 +99,46 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  // VA-18 Step 1 & 2: POST session matching exact backend schema parameters
+  Future<void> _bootstrapAppSession() async {
+    bool success = await _wsService.initializeSession(
+      appLang: "en",
+      consentAt: DateTime.now().toUtc().toIso8601String(),
+      consentVer: "1.0",
+    );
+
+    if (success) {
+      setState(() {
+        _wsStatusText = "Session established. Connecting WS...";
+      });
+
+      _wsService.onEventReceived = (eventData) {
+        setState(() {
+          _eventLogs.insert(
+            0,
+            "[${eventData['type'] ?? 'event'}] ${eventData.toString()}",
+          );
+        });
+      };
+
+      _wsService.connectWebSocket();
+
+      setState(() {
+        _wsStatusText = "WebSocket Connected & Listening";
+      });
+    } else {
+      setState(() {
+        _wsStatusText = "Session creation failed. Check backend.";
+      });
+    }
+  }
+
   @override
   void dispose() {
     _localRenderer.dispose();
     _localStream?.dispose();
     _peerConnection?.dispose();
+    _wsService.disconnect();
     super.dispose();
   }
 
@@ -171,35 +215,78 @@ class _MyHomePageState extends State<MyHomePage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 SizedBox(
-                  width: 260,
-                  height: 320,
+                  width: 220,
+                  height: 260,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: RTCVideoView(_localRenderer, mirror: false),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Text(
                   _statusMessage,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w500,
                     color: _isStreaming ? Colors.green : Colors.black87,
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 10),
                 ElevatedButton(
                   onPressed: _isStreaming ? null : _startStreaming,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 12,
+                      horizontal: 24,
+                      vertical: 10,
                     ),
                   ),
                   child: Text(
                     _isStreaming ? 'Streaming Live...' : 'Start WHIP Stream',
-                    style: const TextStyle(fontSize: 16),
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                ),
+                const Divider(height: 30),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    "WS Status: $_wsStatusText",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: Colors.blueGrey,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    "Live Event Logs (Alerts & Status):",
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  height: 120,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ListView.builder(
+                    itemCount: _eventLogs.length,
+                    itemBuilder: (context, index) {
+                      return ListTile(
+                        dense: true,
+                        title: Text(
+                          _eventLogs[index],
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 11,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
