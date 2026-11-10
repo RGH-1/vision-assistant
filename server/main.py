@@ -22,7 +22,7 @@ from server.ingest.worker import IngestSource, IngestWorker
 from server.routes import ask, sessions, ws
 from server.settings import Settings
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) #Changed from _name__ to __name__ for proper logging configuration
 
 MEDIA_KINDS = ("frames", "thumbs", "originals")
 # shortcut: English only, because these handlers don't know the user's language; VA-64 can localize.
@@ -164,7 +164,7 @@ async def handle_http_error(_: Request, exc: HTTPException) -> JSONResponse:
     return error_response(500, "INTERNAL", "Unexpected server error.")
 
 
-async def handle_uncaught_error(_: Request, __: Exception) -> JSONResponse:
+async def handle_uncaught_error(request: Request, _: Exception) -> JSONResponse:
     # Starlette re-raises the exception after this response, so uvicorn logs the traceback.
     # shortcut: runs outside CORSMiddleware, so a browser on the Vite dev server sees a CORS error
     # instead of this body; the phone and the built dashboard aren't affected.

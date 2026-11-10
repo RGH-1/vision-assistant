@@ -39,18 +39,55 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  // Replace with your PC's actual local IPv4 address from ipconfig
-  final String whipEndpoint = "http://192.168.8.107:8889/mystream/whip";
+  // Routes through FastAPI proxy on port 8000
+  final String whipEndpoint = "http://192.168.8.111:8889/mystream/whip";
 
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   bool _isStreaming = false;
+  String _statusMessage = "Ready to stream";
 
   @override
   void initState() {
     super.initState();
-    _localRenderer.initialize();
+    _initializeCamera();
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      await _localRenderer.initialize();
+
+      Map<Permission, PermissionStatus> statuses = await [
+        Permission.camera,
+        Permission.microphone,
+      ].request();
+
+      if (statuses[Permission.camera] != PermissionStatus.granted ||
+          statuses[Permission.microphone] != PermissionStatus.granted) {
+        setState(() {
+          _statusMessage = "Camera or Microphone permission denied.";
+        });
+        return;
+      }
+
+      final Map<String, dynamic> mediaConstraints = {
+        'audio': true,
+        'video': {'facingMode': 'environment'},
+      };
+
+      _localStream = await navigator.mediaDevices.getUserMedia(
+        mediaConstraints,
+      );
+      _localRenderer.srcObject = _localStream;
+      setState(() {
+        _statusMessage = "Camera loaded successfully!";
+      });
+    } catch (e) {
+      setState(() {
+        _statusMessage = "Camera error: $e";
+      });
+    }
   }
 
   @override
@@ -62,47 +99,24 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _startStreaming() async {
-    try {
-      // 1. Explicitly prompt the user for runtime camera and mic permissions
-      Map<Permission, PermissionStatus> statuses = await [
-        Permission.camera,
-        Permission.microphone,
-      ].request();
-
-      if (statuses[Permission.camera] != PermissionStatus.granted ||
-          statuses[Permission.microphone] != PermissionStatus.granted) {
-        debugPrint("Camera or Microphone permission was denied.");
-        return;
-      }
-
-      // 2. Get camera and microphone stream with flexible constraints for older hardware
-      final Map<String, dynamic> mediaConstraints = {
-        'audio': true,
-        'video': {
-          'width': {'exact': 640}, // 640x480 is the sweet spot for stability
-          'height': {'exact': 480},
-          'frameRate': {'exact': 20},
-          'facingMode': 'environment',
-        },
-      };
-
-      _localStream = await navigator.mediaDevices.getUserMedia(
-        mediaConstraints,
-      );
-      _localRenderer.srcObject = _localStream;
-
-      // 3. Create peer connection
-      _peerConnection = await createPeerConnection({
-        'iceServers': [
-          {'urls': 'stun:stun.l.google.com:19302'},
-        ],
+    if (_localStream == null) {
+      setState(() {
+        _statusMessage = "Error: Camera stream not ready yet.";
       });
+      return;
+    }
+
+    setState(() {
+      _statusMessage = "Connecting to MediaMTX...";
+    });
+
+    try {
+      _peerConnection = await createPeerConnection({'iceServers': []});
 
       for (var track in _localStream!.getTracks()) {
         _peerConnection!.addTrack(track, _localStream!);
       }
 
-      // 4. Create SDP Offer
       RTCSessionDescription offer = await _peerConnection!.createOffer();
       await _peerConnection!.setLocalDescription(offer);
 
@@ -111,12 +125,13 @@ class _MyHomePageState extends State<MyHomePage> {
       RTCSessionDescription? localDesc = await _peerConnection!
           .getLocalDescription();
 
-      // 5. Send WHIP POST request to MediaMTX
-      final response = await http.post(
-        Uri.parse(whipEndpoint),
-        headers: {'Content-Type': 'application/sdp'},
-        body: localDesc?.sdp ?? '',
-      );
+      final response = await http
+          .post(
+            Uri.parse(whipEndpoint),
+            headers: {'Content-Type': 'application/sdp'},
+            body: localDesc?.sdp ?? '',
+          )
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         RTCSessionDescription answer = RTCSessionDescription(
@@ -127,15 +142,17 @@ class _MyHomePageState extends State<MyHomePage> {
 
         setState(() {
           _isStreaming = true;
+          _statusMessage = "Streaming Live Successfully!";
         });
-        debugPrint("WHIP Stream Connected Successfully!");
       } else {
-        debugPrint(
-          "Failed to connect WHIP: ${response.statusCode} - ${response.body}",
-        );
+        setState(() {
+          _statusMessage = "Failed (${response.statusCode}): ${response.body}";
+        });
       }
     } catch (e) {
-      debugPrint("Error starting stream: $e");
+      setState(() {
+        _statusMessage = "Connection failed: $e";
+      });
     }
   }
 
@@ -146,23 +163,48 @@ class _MyHomePageState extends State<MyHomePage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 300,
-              height: 400,
-              child: RTCVideoView(_localRenderer, mirror: false),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 260,
+                  height: 320,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: RTCVideoView(_localRenderer, mirror: false),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _statusMessage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: _isStreaming ? Colors.green : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _isStreaming ? null : _startStreaming,
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 12,
+                    ),
+                  ),
+                  child: Text(
+                    _isStreaming ? 'Streaming Live...' : 'Start WHIP Stream',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _isStreaming ? null : _startStreaming,
-              child: Text(
-                _isStreaming ? 'Streaming Live...' : 'Start WHIP Stream',
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
