@@ -25,6 +25,7 @@ class FrameSelectionConfig:
     contrast_min: float
     unsharp_sigma: float
     unsharp_amount: float
+    severe_blur_ratio: float = 0.01
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,8 @@ class FrameSelector:
 
         if brightness > self._config.brightness_bright:
             return FrameSelectionResult(False, frame, metrics, False, (), False, "overexposed")
+        if sharpness < self._config.sharpness_min * self._config.severe_blur_ratio:
+            return FrameSelectionResult(False, frame, metrics, False, (), False, "blurred")
         reasons = []
         if brightness < self._config.brightness_dark:
             reasons.append("dark")
