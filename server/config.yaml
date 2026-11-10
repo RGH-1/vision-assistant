@@ -48,7 +48,9 @@ object_detection:
   classes:
     - person
     - door
+    - wooden door
     - stairs
+    - wooden stairs
     - elevator
     - escalator
     - chair

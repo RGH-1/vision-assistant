@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
@@ -119,6 +119,65 @@ class YoloeDetector:
             results[0], frame.shape[1], frame.shape[0], self._config.confidence_min
         )
 
+    def detect_region(
+        self,
+        frame: np.ndarray,
+        region: tuple[float, float, float, float],
+        timings_ms: dict[str, float],
+    ) -> tuple[Detection, ...]:
+        """Detect in a crop and convert boxes to full-frame coordinates."""
+
+        left, top, right, bottom = region
+
+        if not (0 <= left < right <= 1 and 0 <= top < bottom <= 1):
+            raise ValueError("invalid normalized crop region")
+
+        height, width = frame.shape[:2]
+
+        x0 = round(left * width)
+        y0 = round(top * height)
+        x1 = round(right * width)
+        y1 = round(bottom * height)
+
+        if x1 <= x0 or y1 <= y0:
+            raise ValueError("crop region is empty")
+
+        cropped = frame[y0:y1, x0:x1]
+        crop_detections = self.detect(cropped, timings_ms)
+
+        full_detections = []
+
+        for detection in crop_detections:
+            bx1, by1, bx2, by2 = detection.bbox
+
+            box = (
+                (x0 + bx1 * (x1 - x0)) / width,
+                (y0 + by1 * (y1 - y0)) / height,
+                (x0 + bx2 * (x1 - x0)) / width,
+                (y0 + by2 * (y1 - y0)) / height,
+            )
+
+            area = (box[2] - box[0]) * (box[3] - box[1])
+            center_x = (box[0] + box[2]) / 2
+
+            position = (
+                "left" if center_x < 1 / 3
+                else "right" if center_x > 2 / 3
+                else "center"
+            )
+
+            full_detections.append(
+                replace(
+                    detection,
+                    bbox=box,
+                    area_ratio=area,
+                    position=position,
+                )
+            )
+
+        return tuple(full_detections)
+
+
 
 def _ultralytics_yoloe(model_path: str) -> YoloeModel:
     """Delay the heavy Ultralytics import until the ingest thread constructs the detector."""
@@ -136,7 +195,10 @@ def _load_model(factory: YoloeFactory, config: ObjectDetectionConfig) -> YoloeMo
         except Exception as fallback_error:
             raise RuntimeError("could not load either configured YOLOE model") from fallback_error
 
-
+LABEL_ALIASES = {
+    "wooden door": "door",
+    "wooden stairs": "stairs",
+}
 def _detections_from_result(
     result: Any,
     width: int,
@@ -159,7 +221,8 @@ def _detections_from_result(
         x1, y1, x2, y2 = _normalized_bbox(bbox, width, height)
         if x2 <= x1 or y2 <= y1:
             continue
-        label = str(result.names[int(class_id)])
+        model_label = str(result.names[int(class_id)])
+        label = LABEL_ALIASES.get(model_label, model_label)
         area_ratio = (x2 - x1) * (y2 - y1)
         position = _position((x1 + x2) / 2)
         detections.append(

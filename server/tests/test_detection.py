@@ -127,5 +127,67 @@ def test_config_matches_the_design_class_list() -> None:
     assert config.fallback_model == "yoloe-11s-seg.pt"
     assert config.confidence_min == 0.35
     assert config.image_size == 640
-    assert len(config.classes) == 36
+    assert len(config.classes) == 38
+    assert {"door", "wooden door", "stairs", "wooden stairs"} <= set(config.classes)
     assert {"door", "stairs", "sign", "exit sign", "room number sign"} <= set(config.classes)
+
+
+def test_crop_detections_use_full_frame_coordinates(
+    config: ObjectDetectionConfig,
+) -> None:
+    model = FakeModel()
+    detector = YoloeDetector(config, model_factory=lambda _: model)
+
+    frame = np.zeros((200, 200, 3), dtype=np.uint8)
+
+    detections = detector.detect_region(
+        frame,
+        region=(0.25, 0.25, 0.75, 0.75),
+        timings_ms={},
+    )
+
+    assert len(detections) == 3
+
+    door = detections[0]
+
+    assert door.label == "door"
+    assert door.bbox == pytest.approx((0.25, 0.25, 0.35, 0.35))
+    assert door.area_ratio == pytest.approx(0.01)
+    assert door.position == "left"
+def test_detection_labels_are_normalized():
+    from types import SimpleNamespace
+    from server.ingest.detection import _detections_from_result
+
+    class FakeBoxes:
+        xyxy = [
+            [10, 10, 50, 80],
+            [60, 10, 100, 80],
+            [110, 10, 150, 80],
+        ]
+        conf = [0.75, 0.46, 0.80]
+        cls = [0, 1, 2]
+
+        def __len__(self):
+            return len(self.conf)
+
+    result = SimpleNamespace(
+        boxes=FakeBoxes(),
+        names={
+            0: "wooden door",
+            1: "wooden stairs",
+            2: "person",
+        },
+    )
+
+    detections = _detections_from_result(
+        result,
+        width=200,
+        height=100,
+        confidence_min=0.35,
+    )
+
+    assert [d.label for d in detections] == [
+        "door",
+        "stairs",
+        "person",
+    ]
