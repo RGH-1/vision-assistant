@@ -84,3 +84,10 @@ object_detection:
     - dog
     - cat
     - plant
+
+frame_keep:
+  detection_confidence_min: 0.35
+  edge_density_min: 0.04
+  canny_low: 100
+  canny_high: 200
+  window_seconds: 1
