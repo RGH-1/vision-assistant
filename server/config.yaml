@@ -29,3 +29,13 @@ frame_selection:
   contrast_min: 25
   unsharp_sigma: 1.0
   unsharp_amount: 1.0
+  severe_blur_ratio: 0.01
+
+frame_enhancement:
+  dark_brightness: 60
+  gamma_min: 0.6
+  gamma_max: 0.8
+  clahe_clip_limit: 2.0
+  clahe_tile_size: 8
+  unsharp_sigma: 1.0
+  unsharp_amount: 1.0

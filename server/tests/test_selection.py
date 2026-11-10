@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from server.ingest.selection import FrameSelectionConfig, FrameSelector, load_frame_selection_config
-
+from dataclasses import replace
 
 @pytest.fixture
 def config() -> FrameSelectionConfig:
@@ -104,3 +104,30 @@ def test_invalid_size_is_rejected(config: FrameSelectionConfig, field: str) -> N
 
     with pytest.raises(ValueError):
         FrameSelector(invalid)
+
+def test_severe_blur_threshold_is_configurable() -> None:
+    config = load_frame_selection_config()
+
+    assert config.severe_blur_ratio == 0.01
+
+    rows, cols = np.indices((128, 128))
+    pattern = (rows // 8 + cols // 8) % 2
+
+    dark = np.repeat(
+        np.where(pattern[..., None] == 0, 10, 40).astype(np.uint8),
+        3,
+        axis=2,
+    )
+
+    blurred = cv2.GaussianBlur(dark, (0, 0), 8)
+
+    strict_result = FrameSelector(config).select(blurred)
+
+    permissive_config = replace(config, severe_blur_ratio=0.00001)
+    permissive_result = FrameSelector(permissive_config).select(blurred)
+
+    assert not strict_result.accepted
+    assert strict_result.drop_reason == "blurred"
+
+    assert permissive_result.accepted
+    assert permissive_result.needs_enhancement
