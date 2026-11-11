@@ -2,7 +2,6 @@
 
 import asyncio
 import wave
-import numpy as np
 from functools import partial
 from io import BytesIO
 from types import SimpleNamespace
@@ -10,6 +9,7 @@ from typing import get_args
 
 import groq
 import httpx
+import numpy as np
 import pytest
 
 from server.assistant import stt

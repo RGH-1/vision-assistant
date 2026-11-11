@@ -109,7 +109,7 @@ async def transcribe(audio: bytes, lang: str, settings: Settings) -> Transcript:
         avg_logprobs = [segment["avg_logprob"] for segment in getattr(result, "segments", [])]
     except groq.GroqError:
         # No key, a timeout, a 429 or an outage: the demo must not go silent (§10.3).
-        logger.warning("Groq failed, so local Whisper transcribes this question", exc_info=True)
+        logger.warning("Groq failed, so local Whisper transcribes this question", error)
         engine = "local"
         text, avg_logprobs = await asyncio.to_thread(transcribe_locally, audio, lang)
     time_ms = (time.perf_counter() - started) * 1000
