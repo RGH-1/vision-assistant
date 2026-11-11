@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from typing import Any, get_args
 from uuid import UUID, uuid4
 
-import groq
 import httpx
 import numpy as np
 import pytest
@@ -239,12 +238,7 @@ def test_low_confidence_counts_as_abstained(
     [
         (stt.Transcript(text="", engine=None, time_ms=5), 400, "BAD_AUDIO", stt.DIDNT_CATCH["ar"]),
         (ValueError("Expected 16 kHz mono 16-bit WAV"), 400, "BAD_AUDIO", stt.DIDNT_CATCH["ar"]),
-        (
-            groq.APIConnectionError(request=httpx.Request("POST", "https://api.groq.com")),
-            502,
-            "STT_FAILED",
-            WENT_WRONG["ar"],
-        ),
+        (RuntimeError("local Whisper failed too"), 502, "STT_FAILED", WENT_WRONG["ar"]),
     ],
 )
 def test_speech_problems_get_a_spoken_reply_and_skip_gemini(
