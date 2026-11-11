@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-import groq
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from psycopg.types.json import Jsonb
@@ -61,7 +60,7 @@ async def answer_live_scene(
     transcript: str,
     lang: Lang,
     input_mode: Literal["voice", "text"],
-    stt_engine: Literal["groq"] | None,
+    stt_engine: Literal["groq", "local"] | None,
     asked_at: datetime,
     started: float,
     timings: TimingsMs,
@@ -187,8 +186,8 @@ async def ask(
         transcript = await stt.transcribe(await audio.read(), lang, request.app.state.settings)
     except ValueError as error:
         return ask_error(400, "BAD_AUDIO", str(error), stt.DIDNT_CATCH[lang])
-    except groq.GroqError:
-        # shortcut: no local Whisper fallback yet; VA-66 adds it here.
+    except Exception:
+        # Groq and local Whisper both failed, and the phone must still have something to say.
         logger.exception("Speech to text failed")
         return ask_error(502, "STT_FAILED", "Speech to text failed.", WENT_WRONG[lang])
     if not transcript.text:

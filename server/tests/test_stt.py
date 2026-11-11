@@ -1,4 +1,4 @@
-"""VA-63 checks. Runs the real Groq library, with only the network replaced."""
+"""VA-63 and VA-66 checks. Runs the real Groq library, with only the network replaced."""
 
 import asyncio
 import wave
@@ -9,6 +9,7 @@ from typing import get_args
 
 import groq
 import httpx
+import numpy as np
 import pytest
 
 from server.assistant import stt
@@ -101,16 +102,71 @@ def test_unsupported_language_is_rejected_without_calling_groq(
     assert not requests
 
 
-@pytest.mark.parametrize("status", [429, 500])
-def test_groq_errors_are_raised_without_retrying(
+def fake_local_whisper(
+    monkeypatch: pytest.MonkeyPatch, text: str, avg_logprobs: list[float]
+) -> list[tuple]:
+    """Replace local Whisper with this result, and return the calls it was given."""
+    calls: list[tuple] = []
+
+    def transcribe_locally(audio: bytes, lang: str) -> tuple[str, list[float]]:
+        calls.append((audio, lang))
+        return text, avg_logprobs
+
+    monkeypatch.setattr(stt, "transcribe_locally", transcribe_locally)
+    return calls
+
+
+@pytest.mark.parametrize("status", [401, 429, 500])
+def test_groq_errors_switch_to_local_whisper_without_retrying(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     requests = fake_groq(monkeypatch, status, {"error": {"message": "no"}})
+    calls = fake_local_whisper(monkeypatch, " Where is the door? ", [-0.2])
 
-    with pytest.raises(groq.APIStatusError):
-        asyncio.run(stt.transcribe(b"audio", "en", SETTINGS))
+    transcript = asyncio.run(stt.transcribe(b"audio", "en", SETTINGS))
 
+    assert (transcript.text, transcript.engine) == ("Where is the door?", "local")
+    assert calls == [(b"audio", "en")]
     assert len(requests) == 1
+
+
+def test_a_missing_groq_key_switches_to_local_whisper(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setattr(stt, "has_speech", lambda audio: True)
+    fake_local_whisper(monkeypatch, "Where is the door?", [-0.2])
+
+    assert asyncio.run(stt.transcribe(b"audio", "en", SETTINGS)).engine == "local"
+
+
+def test_local_transcripts_pass_the_same_confidence_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_groq(monkeypatch, 500, {"error": {"message": "no"}})
+    fake_local_whisper(monkeypatch, "mumble", [-0.74])
+
+    assert asyncio.run(stt.transcribe(b"audio", "en", SETTINGS)).text == ""
+
+
+def test_local_whisper_gets_samples_in_the_users_language(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+
+    def transcribe(samples: np.ndarray, **options: object) -> tuple:
+        calls.append({"samples": samples, **options})
+        segments = [
+            SimpleNamespace(text=" ما", avg_logprob=-0.1),
+            SimpleNamespace(text=" هذا؟", avg_logprob=-0.3),
+        ]
+        return iter(segments), None
+
+    monkeypatch.setattr(stt, "load_local_model", lambda: SimpleNamespace(transcribe=transcribe))
+
+    assert stt.transcribe_locally(silent_wav(1), "ar") == (" ما هذا؟", [-0.1, -0.3])
+    [call] = calls
+    assert call["samples"].dtype == np.float32
+    assert len(call["samples"]) == 16000
+    assert (call["language"], call["temperature"]) == ("ar", 0)
 
 
 def test_audio_without_speech_is_not_sent_to_groq(monkeypatch: pytest.MonkeyPatch) -> None:

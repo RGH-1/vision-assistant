@@ -54,8 +54,10 @@ def load_settings() -> Settings:
     config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
     config.pop("frame_selection")  # loaded directly by server.ingest.selection
     config.pop("frame_enhancement")  # loaded directly by server.ingest.enhance
-    config.pop("frame_keep")  # loaded directly by server.ingest.keep
-    config.pop("object_detection")  # loaded directly by server.ingest.detection
+<<<<<<< HEAD
+   config.pop("frame_keep")  # loaded directly by server.ingest.keep
+   config.pop("frame_novelty")  # loaded directly by       	#server.ingest.novelty
+   config.pop("object_detection")  # loaded directly by  	#server.ingest.detection
     return Settings(
         data_dir=ROOT / os.environ["DATA_DIR"],
         retention_minutes=int(os.environ["RETENTION_MINUTES"]),

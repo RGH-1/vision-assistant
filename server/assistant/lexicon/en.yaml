@@ -1,0 +1,60 @@
+# English keywords for query understanding (design §6.5.2, Appendix B).
+# Phrases, synonyms and numbers are written naturally: the intent engine runs them and the
+# question through text_norm.normalize_text before matching. Regex patterns can't be normalized,
+# so they are already written in normalized form (lowercase).
+
+identity: ["who is", "who's", "who are", "recognize", "his name", "her name", "how old", "man or woman", "is he", "is she"]
+find: ["did you see", "have you seen", "where is", "where are", "where's", "where did i", "find my", "looking for", "lost my"]
+read: ["read", "what does it say", "what does that say", "what did it say", "what's written", "what is written", "sign say", "says"]
+live: ["in front of me", "what do you see", "what can you see", "what's ahead", "what is ahead", "what is this", "what's this", "describe", "around me"]
+past: ["did", "was", "were", "passed", "earlier", "before", "saw", "seen", "just", "ago"]
+out_of_scope: ["capital of", "weather", "who won", "tell me a joke", "what time is it", "the news", "how much is", "president of"]
+
+# Checked in this order; the first match wins. Seconds are counted back from when the question
+# was asked. n_min is "N minutes ago" (N±1 min) and earlier is the whole retention window.
+time:
+  just:    { pattern: '\b(just|a moment ago|a second ago|a few seconds ago)\b', window_s: [3, 90] }
+  minute:  { pattern: '\ba minute ago\b', window_s: [30, 150] }
+  n_min:   { pattern: '\b(\w+) minutes? ago\b' }
+  earlier: { pattern: '\b(earlier|before|previously)\b' }
+# Whisper writes small numbers as words ("two minutes ago").
+numbers: { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }
+
+# Stored YOLOE label -> words that mean it. Plurals are listed because matching is word by word.
+synonyms:
+  person: [person, people, someone, somebody, man, woman]
+  door: [door, doors, doorway, entrance]
+  stairs: [stairs, staircase, stairway, steps]
+  elevator: [elevator, lift]
+  escalator: [escalator, escalators]
+  chair: [chair, chairs, seat]
+  table: [table, tables]
+  desk: [desk, desks]
+  bench: [bench, benches]
+  sofa: [sofa, couch]
+  toilet: [toilet, toilets, restroom, bathroom]
+  sink: [sink, washbasin]
+  trash can: [trash can, trash, bin, garbage]
+  sign: [sign, signs, board, poster, notice]
+  exit sign: [exit sign, exit]
+  room number sign: [room number, room sign, room]
+  traffic light: [traffic light, traffic lights, traffic signal]
+  car: [car, cars, vehicle]
+  bus: [bus, buses]
+  bicycle: [bicycle, bike, bikes]
+  motorcycle: [motorcycle, motorbike, scooter]
+  pole: [pole, poles, pillar]
+  window: [window, windows]
+  laptop: [laptop, computer]
+  phone: [phone, mobile, cellphone, smartphone]
+  bottle: [bottle, water bottle]
+  cup: [cup, cups, mug]
+  backpack: [backpack, rucksack]
+  bag: [bag, bags, handbag, purse]
+  book: [book, books, notebook]
+  keys: [keys, key]
+  wallet: [wallet]
+  umbrella: [umbrella]
+  dog: [dog, dogs, puppy]
+  cat: [cat, cats, kitten]
+  plant: [plant, plants, flower, flowers]

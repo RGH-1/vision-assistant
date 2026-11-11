@@ -20,6 +20,7 @@ import psycopg
 
 from server.common.db import open_ingest_connection
 from server.ingest.embeddings import ClipImageEncoder
+from server.ingest.novelty import dhash
 from server.ingest.store import FrameStore, ProcessedFrame
 from server.settings import ROOT, load_env_file
 
@@ -80,7 +81,7 @@ def process_video(
                     brightness=float(gray.mean()),
                     contrast=float(gray.std()),
                     edge_density=float((cv2.Canny(gray, 100, 200) > 0).mean()),
-                    dhash=_dhash(gray),
+                    dhash=dhash(gray),
                     keep_reason="heartbeat",
                     clip_emb=encoder.encode(image, timings_ms),
                     timings_ms=timings_ms,
@@ -181,15 +182,6 @@ def _required_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"{name} is not configured")
     return value
-
-
-def _dhash(gray: np.ndarray) -> int:
-    small = cv2.resize(gray, (9, 8), interpolation=cv2.INTER_AREA)
-    bits = small[:, 1:] > small[:, :-1]
-    value = 0
-    for bit in bits.flat:
-        value = (value << 1) | int(bit)
-    return value if value < 2**63 else value - 2**64
 
 
 def main() -> None:

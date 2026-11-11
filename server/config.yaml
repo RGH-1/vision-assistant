@@ -40,6 +40,10 @@ frame_enhancement:
   unsharp_sigma: 1.0
   unsharp_amount: 1.0
 
+frame_novelty:
+  new_distance: 12
+  duplicate_distance: 5
+  heartbeat_seconds: 10
 object_detection:
   model: yoloe-26s-seg.pt
   fallback_model: yoloe-11s-seg.pt
