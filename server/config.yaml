@@ -17,6 +17,7 @@ stt_timeout_s: 15 # §6.4
 stt_min_avg_logprob: -0.65 # measured: clear speech -0.06 to -0.20, muffled -0.74 (§6.5.1)
 gemini_timeout_s: 30 # §6.4
 gemini_temperature: 0.2 # §6.5.4
+default_window_s: 180 # memory and past text with no time words look 3 min back (§6.5.2)
 
 frame_selection:
   analysis_width: 640

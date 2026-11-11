@@ -34,6 +34,7 @@ class Settings(BaseModel):
     gemini_model: str
     gemini_timeout_s: float
     gemini_temperature: float
+    default_window_s: float
 
 
 def load_env_file(path: Path) -> None:

@@ -53,6 +53,7 @@ def client(data_dir: Path) -> Iterator[TestClient]:
         gemini_model="stub",
         gemini_timeout_s=1,
         gemini_temperature=0.2,
+        default_window_s=180,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
     options = {"loop_factory": asyncio.SelectorEventLoop}
