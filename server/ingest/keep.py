@@ -127,10 +127,23 @@ class FrameKeepDecider:
 
     def _consider_in_window(self, candidate: FrameKeepCandidate) -> None:
         edge_density = _edge_density(candidate.image, self._config)
-        if not _is_informative(candidate.detections, edge_density, self._config):
+
+        is_heartbeat = candidate.keep_reason == "heartbeat"
+        is_informative = _is_informative(
+            candidate.detections,
+            edge_density,
+            self._config,
+        )
+
+        if not is_informative and not is_heartbeat:
             return
+
         result = KeptFrame(candidate, edge_density)
-        if self._best is None or result.candidate.sharpness > self._best.candidate.sharpness:
+
+        if (
+            self._best is None
+            or result.candidate.sharpness > self._best.candidate.sharpness
+        ):
             self._best = result
 
 

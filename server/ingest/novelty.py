@@ -53,8 +53,9 @@ def hamming_distance(first: int, second: int) -> int:
     return ((first & HASH_MASK) ^ (second & HASH_MASK)).bit_count()
 
 
+
 class FrameNoveltySelector:
-    """Keep first, novel, newly-labelled, or heartbeat frames; drop other duplicates."""
+    """Decide frame novelty and track only successfully saved frames."""
 
     def __init__(self, config: FrameNoveltyConfig) -> None:
         if config.duplicate_distance < 0:
@@ -63,15 +64,20 @@ class FrameNoveltySelector:
             raise ValueError("new_distance must exceed duplicate_distance")
         if config.heartbeat_seconds <= 0:
             raise ValueError("heartbeat_seconds must be positive")
+
         self._config = config
         self._last_saved_hash: int | None = None
         self._last_saved_labels: frozenset[str] = frozenset()
         self._last_saved_at: float | None = None
+        self._first_sample_at: float | None = None
+        self._last_sample_at: float | None = None
 
     def select(
-        self, frame: np.ndarray, labels: Iterable[str], captured_at: float
+        self,
+        frame: np.ndarray,
+        labels: Iterable[str],
+        captured_at: float,
     ) -> NoveltyDecision:
-        """Hash a quality-approved frame and make its stateful retention decision."""
         return self.select_hash(dhash(frame), labels, captured_at)
 
     def select_hash(
@@ -80,33 +86,60 @@ class FrameNoveltySelector:
         labels: Iterable[str],
         captured_at: float,
     ) -> NoveltyDecision:
-        """Make a decision from an already-computed hash for pipeline composition and tests."""
+        if self._last_sample_at is not None and captured_at < self._last_sample_at:
+            raise ValueError("sample timestamps must be ordered")
+
+        if self._first_sample_at is None:
+            self._first_sample_at = captured_at
+
+        self._last_sample_at = captured_at
         label_set = frozenset(labels)
+
         if self._last_saved_hash is None:
-            return self._keep(frame_hash, label_set, captured_at, None, "novel")
+            elapsed = captured_at - self._first_sample_at
+
+            reason = (
+                "heartbeat"
+                if elapsed >= self._config.heartbeat_seconds
+                else "novel"
+            )
+
+            return NoveltyDecision(True, frame_hash, None, reason)
 
         distance = hamming_distance(frame_hash, self._last_saved_hash)
-        if distance >= self._config.new_distance:
-            return self._keep(frame_hash, label_set, captured_at, distance, "novel")
-        if label_set - self._last_saved_labels:
-            return self._keep(frame_hash, label_set, captured_at, distance, "new_objects")
+
         if captured_at - self._last_saved_at >= self._config.heartbeat_seconds:
-            return self._keep(frame_hash, label_set, captured_at, distance, "heartbeat")
+            return NoveltyDecision(True, frame_hash, distance, "heartbeat")
+
+        if label_set - self._last_saved_labels:
+            return NoveltyDecision(True, frame_hash, distance, "new_objects")
+
+        if distance >= self._config.new_distance:
+            return NoveltyDecision(True, frame_hash, distance, "novel")
+
         return NoveltyDecision(False, frame_hash, distance, None)
 
-    def _keep(
+
+    def confirm_saved(
         self,
         frame_hash: int,
-        labels: frozenset[str],
+        labels: Iterable[str],
         captured_at: float,
-        distance: int | None,
-        keep_reason: str,
-    ) -> NoveltyDecision:
-        self._last_saved_hash = frame_hash
-        self._last_saved_labels = labels
-        self._last_saved_at = captured_at
-        return NoveltyDecision(True, frame_hash, distance, keep_reason)
+    ) -> None:
+        if self._last_saved_at is not None and captured_at < self._last_saved_at:
+            raise ValueError("saved frame timestamps must be ordered")
 
+        normalized_hash = frame_hash & HASH_MASK
+
+        if normalized_hash >= 2**63:
+            normalized_hash -= 2**64
+
+        self._last_saved_hash = normalized_hash
+        self._last_saved_labels = frozenset(labels)
+        self._last_saved_at = captured_at
+
+        if self._first_sample_at is None:
+            self._first_sample_at = captured_at
 
 def _as_grayscale(frame: np.ndarray) -> np.ndarray:
     if frame.ndim == 2:

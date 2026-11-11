@@ -115,3 +115,26 @@ def test_config_matches_the_design_defaults() -> None:
     config = load_frame_keep_config()
 
     assert config == FrameKeepConfig(0.35, 0.04, 100, 200, 1)
+
+
+def test_heartbeat_bypasses_informative_filter(
+    config: FrameKeepConfig,
+) -> None:
+    decider = FrameKeepDecider(config)
+
+    decider.consider(
+        candidate(
+            0.0,
+            10,
+            keep_reason="heartbeat",
+        ),
+        0.0,
+    )
+
+    emitted = decider.consider(None, 1.0)
+
+    assert len(emitted) == 1
+    assert emitted[0].candidate.keep_reason == "heartbeat"
+    assert emitted[0].edge_density == 0.0
+    assert decider.stats.kept_frames == 1
+    assert decider.stats.sampled_frames == 2
