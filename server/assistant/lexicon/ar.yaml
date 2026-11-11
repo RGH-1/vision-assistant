@@ -1,0 +1,64 @@
+# Arabic keywords, standard and Lebanese (design §6.5.2, §6.5.6, Appendix B).
+# Phrases, synonyms and numbers are written naturally: the intent engine runs them and the
+# question through text_norm.normalize_text before matching (أ إ آ → ا, ى → ي, ة → ه, ئ → ي).
+# Regex patterns can't be normalized, so they are already written in normalized form.
+# Lebanese speakers say ق as a glottal stop, and Whisper spells what it hears: VA-66 measured
+# قدامي coming back as ادامة, and Groq as الدمي. Those spellings are listed on purpose.
+
+identity: ["مين هيدا", "مين هيدي", "مين هو", "مين هي", "مين هول", "من هذا", "من هذه", "شو اسمه", "شو اسمها", "قديش عمره", "اديش عمره"]
+find: ["شفت", "وين", "أين", "دور على", "دورلي على", "فتش على", "لقيت", "ضيعت"]
+read: ["اقرأ", "اقرالي", "شو مكتوب", "ماذا مكتوب", "ما المكتوب", "شو كاتب", "شو بيقول", "ماذا يقول"]
+live: ["قدامي", "ادامي", "ادامة", "الدمي", "أمامي", "شو في", "في شي", "ماذا يوجد", "شو هيدا", "شو هيدي", "ماذا ترى", "شو عم تشوف", "صف", "وصفلي", "حولي"]
+past: ["كان", "كانت", "شفنا", "مرقنا", "مرينا", "مريت", "قبل", "من شوي"]
+out_of_scope: ["عاصمة", "الطقس", "مين ربح", "من فاز", "نكتة", "شو الساعة", "قديش الساعة", "الأخبار"]
+
+# Checked in this order; the first match wins. Seconds are counted back from when the question
+# was asked. n_min is "N minutes ago" (N±1 min) and earlier is the whole retention window.
+# ابل is how Lebanese speakers say قبل.
+time:
+  just:    { pattern: '(من شوي|قبل شوي|ابل شوي|للتو)', window_s: [3, 90] }
+  minute:  { pattern: '(قبل|ابل) (شي )?دقيقه', window_s: [30, 150] }
+  two_min: { pattern: '(قبل|ابل) دقيقتين', window_s: [60, 180] }
+  n_min:   { pattern: '(?:قبل|ابل) (\w+) (?:دقايق|دقيقه)' }
+  earlier: { pattern: '\bقبل\b' }
+numbers: { تلات: 3, ثلاث: 3, اربع: 4, خمس: 5, ست: 6, سبع: 7, تمن: 8, ثماني: 8, تسع: 9, عشر: 10 }
+
+# Stored YOLOE label -> words that mean it. Possessive forms (مفاتيحي) are listed because
+# "وين مفاتيحي" is the natural way to ask, and ة words change spelling before the suffix.
+synonyms:
+  person: [شخص, أشخاص, حدا, ناس, زلمة, امرأة]
+  door: [باب, بواب, أبواب, مدخل]
+  stairs: [درج, سلم, سلالم]
+  elevator: [مصعد, أسانسير, أسانسور]
+  escalator: [درج كهربائي, سلم كهربائي, درج متحرك, سلم متحرك]
+  chair: [كرسي, كراسي]
+  table: [طاولة, طاولات, ترابيزة]
+  desk: [مكتب, بيرو]
+  bench: [مقعد, مقاعد]
+  sofa: [كنبة, كنباية, أريكة]
+  toilet: [حمام, تواليت, مرحاض]
+  sink: [مغسلة, مجلى]
+  trash can: [زبالة, سلة المهملات, سلة الزبالة, حاوية]
+  sign: [لافتة, لافتات, يافطة, آرمة, لوحة]
+  exit sign: [مخرج, خروج, إشارة الخروج]
+  room number sign: [رقم الغرفة, رقم الأوضة, غرفة, أوضة]
+  traffic light: [إشارة السير, إشارة المرور, ضو السير]
+  car: [سيارة, سيارات, عربية]
+  bus: [باص, بوسطة, حافلة]
+  bicycle: [بسكليت, دراجة, دراجة هوائية]
+  motorcycle: [موتو, موتسيكل, دراجة نارية]
+  pole: [عمود, عواميد, أعمدة]
+  window: [شباك, شبابيك, نافذة]
+  laptop: [لابتوب, كمبيوتر, حاسوب]
+  phone: [تلفون, تلفوني, موبايل, موبايلي, هاتف]
+  bottle: [قنينة, قنينتي, زجاجة]
+  cup: [كوب, كباية, فنجان]
+  backpack: [شنطة ظهر, شنطة ضهر, حقيبة ظهر]
+  bag: [شنطة, شنطتي, حقيبة, حقيبتي, كيس]
+  book: [كتاب, كتابي, دفتر, دفتري]
+  keys: [مفتاح, مفاتيح, مفتاحي, مفاتيحي]
+  wallet: [جزدان, جزداني, محفظة, محفظتي]
+  umbrella: [شمسية, شمسيتي, مظلة]
+  dog: [كلب, كلاب]
+  cat: [قطة, قطط, بسة, بسين]
+  plant: [نبتة, نباتات, زرع, ورد]
