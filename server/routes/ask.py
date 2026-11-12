@@ -10,11 +10,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from psycopg.types.json import Jsonb
 
-from server.assistant import gemini, stt
+from server.assistant import gate, gemini, stt
+from server.assistant.understand import understand
 from server.common.schemas import (
     AskEvidence,
     AskResponse,
     AskTextRequest,
+    Confidence,
     Error,
     ErrorCode,
     ErrorDetail,
@@ -35,6 +37,8 @@ WENT_WRONG: dict[Lang, str] = {
     "ar": "عذرًا، حدث خطأ ما. من فضلك حاول مرة أخرى.",
     "fr": "Désolé, une erreur s'est produite. Veuillez réessayer.",
 }
+NO_FRENCH = "Le français n'est pas encore disponible. Choisissez l'anglais ou l'arabe."
+NOW_INTENTS = ("LIVE_SCENE", "READ_TEXT_NOW")  # answered from the live camera
 
 
 def ask_error(status_code: int, code: ErrorCode, message: str, speak: str) -> JSONResponse:
@@ -53,7 +57,7 @@ async def check_session(request: Request, session_id: UUID) -> None:
             raise HTTPException(status_code=404)
 
 
-async def answer_live_scene(
+async def answer_question(
     request: Request,
     *,
     session_id: UUID,
@@ -65,35 +69,60 @@ async def answer_live_scene(
     started: float,
     timings: TimingsMs,
 ) -> AskResponse | JSONResponse:
-    """Every question is LIVE_SCENE for now; VA-67 adds the other intents."""
     app = request.app
-    frame = app.state.live_buffer.get_sharpest() if app.state.stream_connected else None
-    if frame is None:
-        return ask_error(503, "NO_STREAM", "The camera stream is not connected.", CANT_SEE[lang])
-    captured_at, jpeg, _, detections = frame
-    seconds_ago = time.monotonic() - captured_at  # the ingest thread uses time.monotonic()
-
-    gemini_started = time.perf_counter()
+    understand_started = time.perf_counter()
     try:
-        reply = await gemini.describe_live_scene(
-            jpeg, seconds_ago, detections, transcript, lang, app.state.settings
-        )
-    except Exception:
-        # Whatever failed (quota, timeout, bad JSON), the phone must still have something to say.
-        logger.exception("Gemini failed")
-        return ask_error(502, "GEMINI_FAILED", "Gemini did not answer.", WENT_WRONG[lang])
-    timings["gemini"] = ms_since(gemini_started)
+        question = understand(transcript, lang, asked_at, app.state.settings)
+    except FileNotFoundError:
+        # shortcut: French has no lexicon until VA-78, and without one identity questions
+        # can't be refused in code, so French isn't answered at all.
+        return ask_error(400, "BAD_REQUEST", "French is not supported yet.", NO_FRENCH)
+    timings["understand"] = ms_since(understand_started)
+
+    frame = app.state.live_buffer.get_sharpest() if app.state.stream_connected else None
+    evidence: list[AskEvidence] = []
+    confidence: Confidence
+    if question.intent in gate.FIXED_REPLIES:
+        answer, confidence, model = gate.FIXED_REPLIES[question.intent][lang], "none", "rule"
+    elif question.intent in NOW_INTENTS and frame is None:
+        return ask_error(503, "NO_STREAM", "The camera stream is not connected.", CANT_SEE[lang])
+    elif question.intent in NOW_INTENTS or (question.use_live_frame and frame is not None):
+        # shortcut: READ_TEXT_NOW and the rule-7 fallback use the sharpest live frame only;
+        # sign-box frames (VA-72) and stored frames (VA-70) are added later.
+        captured_at, jpeg, _, detections = frame
+        seconds_ago = time.monotonic() - captured_at  # the ingest thread uses time.monotonic()
+        gemini_started = time.perf_counter()
+        try:
+            reply = await gemini.describe_live_scene(
+                jpeg, seconds_ago, detections, transcript, lang, app.state.settings
+            )
+        except Exception:
+            # Whatever failed (quota, timeout, bad JSON), the phone still needs something to say.
+            logger.exception("Gemini failed")
+            return ask_error(502, "GEMINI_FAILED", "Gemini did not answer.", WENT_WRONG[lang])
+        timings["gemini"] = ms_since(gemini_started)
+        answer, confidence, model = reply.answer, reply.confidence, app.state.settings.gemini_model
+        # shortcut: a single live frame has nothing to be ranked against; VA-70 adds scores.
+        evidence = [
+            AskEvidence(frame_id=None, seconds_ago=round(seconds_ago, 1), thumb_url=None, score=1)
+        ]
+    else:
+        # The evidence gate: no candidates, so "I'm not sure" without calling Gemini (§6.5.5).
+        # shortcut: memory search (VA-70) isn't built yet, so memory questions have no candidates;
+        # VA-70 adds them and gates the ones that score below EVIDENCE_MIN.
+        answer, confidence, model = gate.NOT_SURE[lang], "none", "template"
+
     timings["total"] = ms_since(started)
     # shortcut: only the prompt keeps "safe" out of answers until the safety filter (VA-73).
-    abstained = reply.confidence == "low"
-    model = app.state.settings.gemini_model
+    abstained = confidence in ("low", "none")
 
     async with app.state.pool.connection() as conn:
         cursor = await conn.execute(
             """
             INSERT INTO questions (session_id, asked_at, input_mode, stt_engine, transcript, lang,
-                                   intent, answer, confidence, abstained, model, timings_ms)
-            VALUES (%s, %s, %s, %s, %s, %s, 'LIVE_SCENE', %s, %s, %s, %s, %s)
+                                   intent, t_from, t_to, answer, confidence, abstained, model,
+                                   timings_ms)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -103,8 +132,11 @@ async def answer_live_scene(
                 stt_engine,
                 transcript,
                 lang,
-                reply.answer,
-                reply.confidence,
+                question.intent,
+                question.t_from,
+                question.t_to,
+                answer,
+                confidence,
                 abstained,
                 model,
                 Jsonb(timings),
@@ -123,11 +155,11 @@ async def answer_live_scene(
             "stt_engine": stt_engine,
             "transcript": transcript,
             "lang": lang,
-            "intent": "LIVE_SCENE",
-            "t_from": None,
-            "t_to": None,
-            "answer": reply.answer,
-            "confidence": reply.confidence,
+            "intent": question.intent,
+            "t_from": question.t_from,
+            "t_to": question.t_to,
+            "answer": answer,
+            "confidence": confidence,
             "abstained": abstained,
             "safety_rewrite": False,  # nothing rewrites answers until the safety filter (VA-73)
             "model": model,
@@ -141,14 +173,11 @@ async def answer_live_scene(
         question_id=question_id,
         transcript=transcript,
         lang=lang,
-        intent="LIVE_SCENE",
-        answer=reply.answer,
-        confidence=reply.confidence,
+        intent=question.intent,
+        answer=answer,
+        confidence=confidence,
         abstained=abstained,
-        # shortcut: a single live frame has nothing to be ranked against; VA-70 adds scores.
-        evidence=[
-            AskEvidence(frame_id=None, seconds_ago=round(seconds_ago, 1), thumb_url=None, score=1)
-        ],
+        evidence=evidence,
         timings_ms=timings,
     )
 
@@ -157,7 +186,7 @@ async def answer_live_scene(
 async def ask_text(body: AskTextRequest, request: Request) -> AskResponse | JSONResponse:
     asked_at, started = datetime.now(UTC), time.perf_counter()
     await check_session(request, body.session_id)
-    return await answer_live_scene(
+    return await answer_question(
         request,
         session_id=body.session_id,
         transcript=body.text,
@@ -193,7 +222,7 @@ async def ask(
     if not transcript.text:
         return ask_error(400, "BAD_AUDIO", "No speech was understood.", stt.DIDNT_CATCH[lang])
 
-    return await answer_live_scene(
+    return await answer_question(
         request,
         session_id=session_id,
         transcript=transcript.text,
