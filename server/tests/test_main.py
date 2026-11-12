@@ -71,6 +71,7 @@ def settings(tmp_path: Path) -> Settings:
         gemini_model="stub",
         gemini_timeout_s=1,
         gemini_temperature=0.2,
+        default_window_s=180,
         rtsp_url="rtsp://example.invalid/phone",
         sample_hz=5,
         ingest_no_frame_timeout_s=3,
