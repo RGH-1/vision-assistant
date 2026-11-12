@@ -7,6 +7,7 @@ import pytest
 from psycopg.errors import CheckViolation
 
 from server.common.db import open_ingest_connection
+from server.ingest.faceblur import FaceBlurResult
 from server.ingest.store import FrameStore, ProcessedFrame, StoredDetection, StoredOcr
 
 
@@ -16,6 +17,15 @@ class FakeHub:
 
     def publish(self, event: dict) -> None:
         self.events.append(event)
+
+
+class FakeFaceBlurrer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def blur(self, image: np.ndarray, _: dict[str, float] | None = None) -> FaceBlurResult:
+        self.calls += 1
+        return FaceBlurResult(image.copy(), 2)
 
 
 def test_store_writes_variants_rows_and_dashboard_event(tmp_path: Path) -> None:
@@ -31,7 +41,8 @@ def test_store_writes_variants_rows_and_dashboard_event(tmp_path: Path) -> None:
         ).fetchone()["id"]
         connection.commit()
         hub = FakeHub()
-        store = FrameStore(tmp_path, connection, hub)
+        blurrer = FakeFaceBlurrer()
+        store = FrameStore(tmp_path, connection, blurrer, hub)
         image = np.full((900, 1600, 3), 128, dtype=np.uint8)
         frame_id = store.store(
             ProcessedFrame(
@@ -62,6 +73,8 @@ def test_store_writes_variants_rows_and_dashboard_event(tmp_path: Path) -> None:
             "SELECT * FROM ocr_texts WHERE frame_id = %s", (frame_id,)
         ).fetchall()
         assert row["scene_text"] == "door center | غرفه 204"
+        assert row["faces_blurred"] == 2
+        assert blurrer.calls == 2  # enhanced and original files are both privacy-filtered
         assert row["timings_ms"] == {"clip": 3.5}
         assert len(detections) == len(ocr) == 1
         assert ocr[0]["text_norm"] == "غرفه 204"
@@ -98,7 +111,7 @@ def test_store_removes_files_when_the_database_transaction_fails(tmp_path: Path)
             """
         ).fetchone()["id"]
         connection.commit()
-        store = FrameStore(tmp_path, connection)
+        store = FrameStore(tmp_path, connection, FakeFaceBlurrer())
         image = np.zeros((100, 100, 3), dtype=np.uint8)
 
         with pytest.raises(CheckViolation):

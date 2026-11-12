@@ -1,4 +1,3 @@
-
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -7,8 +6,14 @@ import numpy as np
 
 from server.common.db import open_ingest_connection
 from server.ingest.enhance import FrameEnhancer, load_frame_enhancement_config
+from server.ingest.faceblur import FaceBlurResult
 from server.ingest.selection import FrameSelector, load_frame_selection_config
 from server.ingest.store import FrameStore, ProcessedFrame
+
+
+class FakeFaceBlurrer:
+    def blur(self, image: np.ndarray, _: dict[str, float] | None = None) -> FaceBlurResult:
+        return FaceBlurResult(image.copy(), 0)
 
 
 def test_dark_frame_selection_enhancement_and_storage(tmp_path: Path) -> None:
@@ -25,9 +30,7 @@ def test_dark_frame_selection_enhancement_and_storage(tmp_path: Path) -> None:
     assert selection.accepted
     assert selection.needs_enhancement
 
-    enhancement = FrameEnhancer(
-        load_frame_enhancement_config()
-    ).enhance(
+    enhancement = FrameEnhancer(load_frame_enhancement_config()).enhance(
         selection.image,
         brightness=selection.metrics.brightness,
         low_contrast="low_contrast" in selection.enhancement_reasons,
@@ -52,7 +55,7 @@ def test_dark_frame_selection_enhancement_and_storage(tmp_path: Path) -> None:
         ).fetchone()["id"]
         connection.commit()
 
-        store = FrameStore(tmp_path, connection)
+        store = FrameStore(tmp_path, connection, FakeFaceBlurrer())
         frame_id = store.store(
             ProcessedFrame(
                 session_id=session_id,
@@ -98,6 +101,7 @@ def test_dark_frame_selection_enhancement_and_storage(tmp_path: Path) -> None:
             )
             connection.commit()
         connection.close()
+
 
 def test_dark_frame_with_extreme_blur_is_rejected() -> None:
     rows, cols = np.indices((128, 128))

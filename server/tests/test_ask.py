@@ -16,6 +16,7 @@ from server import main
 from server.assistant import gemini, stt
 from server.common.db import open_ingest_connection
 from server.common.schemas import AskResponse, Error, Lang, QueryAnsweredMessage
+from server.ingest.faceblur import FaceBlurResult
 from server.main import create_app
 from server.routes.ask import CANT_SEE, WENT_WRONG
 from server.settings import Settings
@@ -38,6 +39,11 @@ class IdleIngestWorker:
 
     def stop(self) -> None:
         pass
+
+
+class FakeFaceBlurrer:
+    def blur(self, image: np.ndarray) -> FaceBlurResult:
+        return FaceBlurResult(image.copy(), 0)
 
 
 @pytest.fixture(scope="module")
@@ -83,7 +89,9 @@ def session_id(client: TestClient, db: Connection) -> Iterator[str]:
     body = {"app_lang": "en", "consent_at": "2026-11-08T10:00:00Z", "consent_ver": CONSENT_VER}
     created = client.post("/v1/sessions", json=body).json()["session_id"]
     # A new session empties the live buffer, so the frame goes in after it.
-    client.app.state.live_buffer.add(np.zeros((540, 960, 3), np.uint8), time.monotonic() - 2)
+    client.app.state.live_buffer.add(
+        np.zeros((540, 960, 3), np.uint8), time.monotonic() - 2, face_blurrer=FakeFaceBlurrer()
+    )
     client.app.state.stream_connected = True
     yield created
     db.execute("DELETE FROM sessions WHERE consent_ver = %s", (CONSENT_VER,))

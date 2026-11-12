@@ -20,6 +20,7 @@ import psycopg
 
 from server.common.db import open_ingest_connection
 from server.ingest.embeddings import ClipImageEncoder
+from server.ingest.faceblur import FaceBlurrer, load_face_blur_config
 from server.ingest.novelty import dhash
 from server.ingest.store import FrameStore, ProcessedFrame
 from server.settings import ROOT, load_env_file
@@ -108,7 +109,7 @@ def create_fixture(video_path: Path, output_dir: Path, sample_interval_s: float)
         connection.commit()
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        store = FrameStore(output_dir / "images", connection)
+        store = FrameStore(output_dir / "images", connection, FaceBlurrer(load_face_blur_config()))
         stored = process_video(
             video_path, session_id, store, ClipImageEncoder(), sample_interval_s=sample_interval_s
         )
