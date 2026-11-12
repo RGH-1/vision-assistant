@@ -127,3 +127,103 @@ def test_search_text_drops_stop_words() -> None:
 def test_a_language_without_a_lexicon_is_an_error() -> None:
     with pytest.raises(FileNotFoundError):
         ask("Qui est-ce ?", "fr")
+
+
+# VA-69: every planned demo question (§16) plus natural English and Arabic (standard and
+# Lebanese) phrasings, with past/present pairs. The window is (newest, oldest) seconds before
+# the question, or None when the question doesn't search stored frames.
+INTENT_SET = [
+    # --- English ---
+    ("en", "What's in front of me?", "LIVE_SCENE", None, []),  # demo step 2
+    ("en", "What was in front of me?", "MEMORY", (0, 180), []),
+    ("en", "Is there a chair near me?", "LIVE_SCENE", None, ["chair"]),
+    ("en", "Was there a chair back there?", "MEMORY", (0, 180), ["chair"]),
+    ("en", "Describe what's around me.", "LIVE_SCENE", None, []),
+    ("en", "Is it safe to cross?", "LIVE_SCENE", None, []),  # demo step 6
+    ("en", "Read this sign for me.", "READ_TEXT_NOW", None, ["sign"]),
+    ("en", "What does this say?", "READ_TEXT_NOW", None, []),
+    ("en", "What did that sign say?", "READ_TEXT_PAST", (0, 180), ["sign"]),
+    # demo step 4: "written" makes it a reading question, so it searches frames with OCR text
+    ("en", "What was written on the door I just passed?", "READ_TEXT_PAST", (3, 90), ["door"]),
+    (
+        "en",
+        "What did the room sign say a minute ago?",
+        "READ_TEXT_PAST",
+        (30, 150),
+        ["sign", "room number sign"],
+    ),
+    ("en", "Did you see a bottle?", "FIND_OBJECT", (0, 1800), ["bottle"]),  # demo step 5
+    # demo step 6: not a YOLOE class, so no label; the evidence gate (VA-71) says "I'm not sure"
+    ("en", "Did you see a fire extinguisher?", "FIND_OBJECT", (0, 1800), []),
+    ("en", "Where did I leave my keys?", "FIND_OBJECT", (0, 1800), ["keys"]),
+    ("en", "Where was my backpack 3 minutes ago?", "FIND_OBJECT", (120, 240), ["backpack"]),
+    ("en", "What did we pass just now?", "MEMORY", (3, 90), []),
+    ("en", "What did I walk past earlier?", "MEMORY", (0, 1800), []),
+    ("en", "Who is this?", "IDENTITY", None, []),  # demo step 6
+    ("en", "Who's standing next to me?", "IDENTITY", None, []),
+    ("en", "How old is the man in front of me?", "IDENTITY", None, ["person"]),
+    ("en", "What's the weather like today?", "OUT_OF_SCOPE", None, []),
+    ("en", "Tell me a joke.", "OUT_OF_SCOPE", None, []),
+    ("en", "What's the capital of Lebanon?", "OUT_OF_SCOPE", None, []),
+    ("en", "Hmm, okay.", "MEMORY", (0, 180), []),  # nothing matches: memory + live frame
+    pytest.param(
+        "en",
+        "I just want to know what's ahead.",
+        "LIVE_SCENE",
+        None,
+        [],
+        marks=pytest.mark.xfail(
+            reason="'just' counts as past tense, which the door-I-just-passed questions need"
+        ),
+    ),
+    # --- Arabic ---
+    ("ar", "شو في قدامي؟", "LIVE_SCENE", None, []),
+    ("ar", "شو كان قدامي؟", "MEMORY", (0, 180), []),
+    ("ar", "ماذا يوجد أمامي؟", "LIVE_SCENE", None, []),
+    ("ar", "في شي قدامي؟", "LIVE_SCENE", None, []),
+    ("ar", "شو عم تشوف هلق؟", "LIVE_SCENE", None, []),
+    ("ar", "في كرسي حدي؟", "LIVE_SCENE", None, ["chair"]),
+    ("ar", "صفلي شو حولي", "LIVE_SCENE", None, []),
+    ("ar", "هل الطريق آمن للعبور؟", "LIVE_SCENE", None, []),
+    ("ar", "شو مكتوب هون؟", "READ_TEXT_NOW", None, []),  # demo step 3
+    ("ar", "اقرالي هاللافتة", "READ_TEXT_NOW", None, ["sign"]),
+    ("ar", "شو كاتب عالباب؟", "READ_TEXT_NOW", None, ["door"]),
+    ("ar", "شو كان مكتوب عاللافتة؟", "READ_TEXT_PAST", (0, 180), ["sign"]),
+    ("ar", "شو كان مكتوب عالباب يلي مرقنا حدو من شوي؟", "READ_TEXT_PAST", (3, 90), ["door"]),
+    ("ar", "وين شفت المفاتيح؟", "FIND_OBJECT", (0, 1800), ["keys"]),
+    ("ar", "شفت قنينة مي؟", "FIND_OBJECT", (0, 1800), ["bottle"]),
+    ("ar", "وين حطيت جزداني؟", "FIND_OBJECT", (0, 1800), ["wallet"]),
+    ("ar", "وين كانت الشنطة قبل خمس دقايق؟", "FIND_OBJECT", (240, 360), ["bag"]),
+    ("ar", "شو شفنا قبل شوي؟", "MEMORY", (3, 90), []),
+    ("ar", "شو مرقنا قبل دقيقة؟", "MEMORY", (30, 150), []),
+    ("ar", "مرقنا على درج قبل؟", "MEMORY", (0, 1800), ["stairs"]),
+    ("ar", "مين هيدا؟", "IDENTITY", None, []),
+    ("ar", "مين هيدي يلي قدامي؟", "IDENTITY", None, []),
+    ("ar", "من هذا الشخص؟", "IDENTITY", None, ["person"]),
+    ("ar", "شو اسمه؟", "IDENTITY", None, []),
+    ("ar", "شو الطقس اليوم؟", "OUT_OF_SCOPE", None, []),
+    ("ar", "قديش الساعة؟", "OUT_OF_SCOPE", None, []),
+    ("ar", "مين ربح المباراة؟", "OUT_OF_SCOPE", None, []),
+]
+
+
+@pytest.mark.parametrize(("lang", "question", "intent", "window", "labels"), INTENT_SET)
+def test_intent_set(
+    lang: str,
+    question: str,
+    intent: str,
+    window: tuple[float, float] | None,
+    labels: list[str],
+) -> None:
+    understanding = ask(question, lang)
+    found_window = (
+        None
+        if understanding.t_from is None
+        else (seconds_ago(understanding.t_to), seconds_ago(understanding.t_from))
+    )
+
+    assert (understanding.intent, found_window, understanding.target_labels) == (
+        intent,
+        window,
+        labels,
+    )

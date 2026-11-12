@@ -15,8 +15,9 @@ from server.settings import Settings
 
 LEXICON_DIR = Path(__file__).parent / "lexicon"
 PHRASE_LISTS = ["identity", "find", "read", "live", "past", "out_of_scope"]
-# Arabic glues و ف ب ل ك ع and ال onto the next word: والباب, عاللافتة, للباب.
-ARABIC_PREFIX = "(?:[وفبلكع])?(?:ال|ل)?"
+# Arabic glues و ف ب ل ك ع, Lebanese ها ("this") and ال onto the next word:
+# والباب, عاللافتة, هالباب.
+ARABIC_PREFIX = "(?:[وفبلكع]|ها)?(?:ال|ل)?"
 # These intents search stored frames, so they get a time window.
 SEARCHES_MEMORY = ("READ_TEXT_PAST", "MEMORY", "FIND_OBJECT")
 

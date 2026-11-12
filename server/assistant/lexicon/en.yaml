@@ -4,9 +4,9 @@
 # so they are already written in normalized form (lowercase).
 
 identity: ["who is", "who's", "who are", "recognize", "his name", "her name", "how old", "man or woman", "is he", "is she"]
-find: ["did you see", "have you seen", "where is", "where are", "where's", "where did i", "find my", "looking for", "lost my"]
+find: ["did you see", "have you seen", "where is", "where are", "where's", "where did i", "find my", "looking for", "lost my", "where was", "where were"]
 read: ["read", "what does it say", "what does this say", "what does that say", "what did it say", "written", "sign say", "says"]
-live: ["in front", "ahead", "is there", "what do you see", "what can you see", "what is this", "what's this", "describe", "around me"]
+live: ["in front", "ahead", "is there", "what do you see", "what can you see", "what is this", "what's this", "describe", "around me", "safe", "cross"]
 past: ["did", "was", "were", "passed", "earlier", "before", "saw", "seen", "just", "ago"]
 out_of_scope: ["capital of", "weather", "who won", "tell me a joke", "what time is it", "the news", "how much is", "president of"]
 
