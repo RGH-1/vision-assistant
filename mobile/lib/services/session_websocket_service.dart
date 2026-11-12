@@ -9,10 +9,23 @@ import 'package:web_socket_channel/status.dart' as status;
 class SessionWebSocketService {
   static const String baseUrl = "http://192.168.8.111:8000";
   static const String wsUrl = "ws://192.168.8.111:8000/v1/ws/phone";
+  static const List<String> _candidateBaseUrls = [
+    "http://localhost:8000",
+    "http://192.168.8.111:8000",
+  ];
+
+  String _activeBaseUrl = baseUrl;
+  String get activeBaseUrl => _activeBaseUrl;
 
   String? _sessionId;
+  String? get sessionId => _sessionId;
   WebSocketChannel? _channel;
   Timer? _pingTimer;
+
+  @visibleForTesting
+  void setSessionIdForTesting(String? id) {
+    _sessionId = id;
+  }
 
   // Reconnection backoff tracking
   int _reconnectAttempts = 0;
@@ -37,34 +50,40 @@ class SessionWebSocketService {
       debugPrint("SENDING TO BACKEND: ${jsonEncode(payload)}");
     }
 
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/v1/sessions'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
-      );
+    for (final candidate in _candidateBaseUrls) {
+      try {
+        final response = await http
+            .post(
+              Uri.parse('$candidate/v1/sessions'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(payload),
+            )
+            .timeout(const Duration(seconds: 4));
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = jsonDecode(response.body);
-        _sessionId = data['session_id'] ?? data['id'];
-        if (kDebugMode) {
-          debugPrint("SESSION CREATED SUCCESSFULLY: $_sessionId");
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          final data = jsonDecode(response.body);
+          _sessionId = data['session_id'] ?? data['id'];
+          _activeBaseUrl = candidate;
+          if (kDebugMode) {
+            debugPrint(
+              "SESSION CREATED SUCCESSFULLY ($candidate): $_sessionId",
+            );
+          }
+          return true;
+        } else {
+          if (kDebugMode) {
+            debugPrint(
+              "REJECTED BY SERVER ($candidate ${response.statusCode}): ${response.body}",
+            );
+          }
         }
-        return true;
-      } else {
+      } catch (e) {
         if (kDebugMode) {
-          debugPrint(
-            "REJECTED BY SERVER (${response.statusCode}): ${response.body}",
-          );
+          debugPrint("SESSION EXCEPTION ($candidate): $e");
         }
-        return false;
       }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint("SESSION EXCEPTION: $e");
-      }
-      return false;
     }
+    return false;
   }
 
   /// Step 2 & 3: Open WebSocket using session_id query param, send hello, handle ping/pong & backoff
@@ -72,7 +91,8 @@ class SessionWebSocketService {
     if (_sessionId == null) return;
 
     _isManuallyClosed = false;
-    final uri = Uri.parse('$wsUrl?session_id=$_sessionId');
+    final activeWsBase = _activeBaseUrl.replaceFirst('http://', 'ws://');
+    final uri = Uri.parse('$activeWsBase/v1/ws/phone?session_id=$_sessionId');
 
     if (kDebugMode) {
       debugPrint("CONNECTING TO WS: $uri");
@@ -118,7 +138,7 @@ class SessionWebSocketService {
     final helloPayload = jsonEncode({
       "type": "hello",
       "session_id": _sessionId,
-      "client": "mobile_app",
+      "app_lang": "en",
     });
     _channel?.sink.add(helloPayload);
   }
@@ -126,10 +146,7 @@ class SessionWebSocketService {
   void _startHeartbeat() {
     _pingTimer?.cancel();
     _pingTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
-      final pingPayload = jsonEncode({
-        "type": "ping",
-        "timestamp": DateTime.now().toUtc().toIso8601String(),
-      });
+      final pingPayload = jsonEncode({"type": "ping"});
       _channel?.sink.add(pingPayload);
     });
   }
