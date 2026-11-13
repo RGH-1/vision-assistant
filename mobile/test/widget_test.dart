@@ -7,8 +7,10 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mobile/main.dart';
 import 'package:mobile/models/ask_models.dart';
+import 'package:mobile/models/settings_models.dart';
 import 'package:mobile/services/ask_service.dart';
 import 'package:mobile/services/session_websocket_service.dart';
+import 'package:mobile/services/tts_service.dart';
 import 'package:record/record.dart';
 
 Uint8List buildTestWav({int numSamples = 16000}) {
@@ -62,6 +64,58 @@ class FakeAudioRecorder implements AudioRecorderAdapter {
 
   @override
   Future<void> dispose() async {}
+}
+
+class FakeTtsEngine implements TtsEngineAdapter {
+  final List<String> languagesSet = [];
+  final List<double> speechRatesSet = [];
+  final List<String> spokenTexts = [];
+  int stopCalls = 0;
+
+  VoidCallback? _completionHandler;
+  VoidCallback? _cancelHandler;
+
+  @override
+  Future<dynamic> setLanguage(String language) async {
+    languagesSet.add(language);
+    return 1;
+  }
+
+  @override
+  Future<dynamic> setSpeechRate(double rate) async {
+    speechRatesSet.add(rate);
+    return 1;
+  }
+
+  @override
+  Future<dynamic> speak(String text) async {
+    spokenTexts.add(text);
+    return 1;
+  }
+
+  @override
+  Future<dynamic> stop() async {
+    stopCalls++;
+    _cancelHandler?.call();
+    return 1;
+  }
+
+  void simulateCompletion() {
+    _completionHandler?.call();
+  }
+
+  @override
+  void setCompletionHandler(VoidCallback callback) {
+    _completionHandler = callback;
+  }
+
+  @override
+  void setCancelHandler(VoidCallback callback) {
+    _cancelHandler = callback;
+  }
+
+  @override
+  void setErrorHandler(void Function(dynamic message) callback) {}
 }
 
 void main() {
@@ -323,4 +377,169 @@ void main() {
     expect(askError.code, 'STT_FAILED');
     expect(askError.speak, 'Sorry, something went wrong. Please try again.');
   });
+
+  test('TtsService maps en/ar/fr to en-US, ar, fr-FR and uses settings speechRate', () async {
+    final fakeEngine = FakeTtsEngine();
+    final settings = SettingsModel(language: 'en-US', speechRate: 0.65);
+    final ttsService = TtsService(
+      engine: fakeEngine,
+      settingsProvider: () => settings,
+    );
+
+    await ttsService.speakAnswer('Door ahead.', lang: 'en');
+    expect(fakeEngine.languagesSet.last, 'en-US');
+    expect(fakeEngine.speechRatesSet.last, 0.65);
+    expect(fakeEngine.spokenTexts.last, 'Door ahead.');
+
+    settings.speechRate = 0.45;
+    await ttsService.speakAnswer('أمامك باب خشبي.', lang: 'ar');
+    expect(fakeEngine.languagesSet.last, 'ar');
+    expect(fakeEngine.speechRatesSet.last, 0.45);
+    expect(fakeEngine.spokenTexts.last, 'أمامك باب خشبي.');
+
+    await ttsService.speakAnswer('Il y a une porte devant vous.', lang: 'fr');
+    expect(fakeEngine.languagesSet.last, 'fr-FR');
+    expect(fakeEngine.spokenTexts.last, 'Il y a une porte devant vous.');
+  });
+
+  test('Priority: answers suppress incoming alerts and preempt ongoing alerts', () async {
+    final fakeEngine = FakeTtsEngine();
+    final settings = SettingsModel(
+      language: 'en-US',
+      speechRate: 0.5,
+      alertsEnabled: true,
+    );
+    final ttsService = TtsService(
+      engine: fakeEngine,
+      settingsProvider: () => settings,
+    );
+
+    // 1. Start speaking an alert
+    final alertSpoken = await ttsService.speakAlert('Stairs ahead.', lang: 'en');
+    expect(alertSpoken, isTrue);
+    expect(ttsService.isSpeakingAlert, isTrue);
+    expect(fakeEngine.spokenTexts.last, 'Stairs ahead.');
+
+    // 2. An answer arrives while alert is still speaking -> preempts the alert
+    await ttsService.speakAnswer('أمامك باب.', lang: 'ar');
+    expect(ttsService.isSpeakingAnswer, isTrue);
+    expect(ttsService.isSpeakingAlert, isFalse);
+    expect(fakeEngine.languagesSet.last, 'ar');
+    expect(fakeEngine.spokenTexts.last, 'أمامك باب.');
+
+    // 3. Another alert arrives while the answer is still speaking -> suppressed!
+    final secondAlertSpoken = await ttsService.speakAlert(
+      'Obstacle ahead.',
+      lang: 'en',
+    );
+    expect(secondAlertSpoken, isFalse);
+    expect(fakeEngine.spokenTexts.last, 'أمامك باب.');
+
+    // 4. Once answer finishes speaking, alerts can speak again
+    fakeEngine.simulateCompletion();
+    expect(ttsService.isSpeakingAnswer, isFalse);
+
+    final thirdAlertSpoken = await ttsService.speakAlert(
+      'Door ahead.',
+      lang: 'en',
+    );
+    expect(thirdAlertSpoken, isTrue);
+    expect(fakeEngine.spokenTexts.last, 'Door ahead.');
+  });
+
+  testWidgets(
+    'Arabic answer is spoken with ar locale and new press triggers barge-in stop',
+    (WidgetTester tester) async {
+      DateTime fakeNow = DateTime.utc(2026, 11, 13, 12, 0, 0);
+      final fakeRecorder = FakeAudioRecorder();
+      final fakeTts = FakeTtsEngine();
+      final settings = SettingsModel(language: 'ar', speechRate: 0.55);
+      final ttsService = TtsService(
+        engine: fakeTts,
+        settingsProvider: () => settings,
+      );
+
+      final mockClient = MockClient.streaming((request, bodyStream) async {
+        await bodyStream.toBytes();
+        final payload = jsonEncode({
+          'question_id': 99,
+          'transcript': 'ماذا يوجد أمامي؟',
+          'lang': 'ar',
+          'intent': 'LIVE_SCENE',
+          'answer': 'أمامك باب أبيض وحقيبة سوداء.',
+          'confidence': 'high',
+          'abstained': false,
+          'evidence': [
+            {
+              'frame_id': null,
+              'seconds_ago': 0.5,
+              'thumb_url': null,
+              'score': 1.0,
+            },
+          ],
+          'timings_ms': {'stt': 300.0, 'gemini': 1100.0, 'total': 1400.0},
+        });
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(payload)),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final wsService = SessionWebSocketService()
+        ..setSessionIdForTesting('3f2b8c1e-7a4d-4e6f-9b1a-2c5d8e7f6a01');
+      final askService = AskService(
+        recorder: fakeRecorder,
+        httpClient: mockClient,
+        now: () => fakeNow,
+      );
+
+      await tester.pumpWidget(
+        MyApp(
+          askService: askService,
+          wsService: wsService,
+          ttsService: ttsService,
+          settings: settings,
+          enablePlatformInit: false,
+        ),
+      );
+
+      // Hold for 1.0 s and release -> receives Arabic answer and speaks it
+      final gesture1 = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('hold_to_talk_surface'))),
+      );
+      await tester.pump();
+      fakeNow = fakeNow.add(const Duration(seconds: 1));
+      await gesture1.up();
+      await tester.pumpAndSettle();
+
+      expect(fakeTts.languagesSet.last, 'ar');
+      expect(fakeTts.speechRatesSet.last, 0.55);
+      expect(fakeTts.spokenTexts.last, 'أمامك باب أبيض وحقيبة سوداء.');
+      expect(ttsService.isSpeakingAnswer, isTrue);
+
+      // Incoming WS alert while answer is still speaking is suppressed
+      wsService.onEventReceived?.call({
+        'type': 'alert',
+        'alert_id': 7,
+        'kind': 'door_ahead',
+        'message': 'Door ahead.',
+        'lang': 'en',
+      });
+      await tester.pump();
+      expect(fakeTts.spokenTexts.last, 'أمامك باب أبيض وحقيبة سوداء.');
+
+      // Barge-in: pressing the screen while answer is still speaking immediately stops TTS
+      final stopCountBeforePress = fakeTts.stopCalls;
+      final gesture2 = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('hold_to_talk_surface'))),
+      );
+      await tester.pump();
+      expect(fakeTts.stopCalls, greaterThan(stopCountBeforePress));
+      expect(ttsService.isSpeakingAnswer, isFalse);
+
+      await gesture2.up();
+      await tester.pumpAndSettle();
+    },
+  );
 }

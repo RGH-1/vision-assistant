@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'models/ask_models.dart';
+import 'models/settings_models.dart';
 import 'services/ask_service.dart';
 import 'services/session_websocket_service.dart';
+import 'services/tts_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,11 +25,15 @@ class MyApp extends StatelessWidget {
     super.key,
     this.askService,
     this.wsService,
+    this.ttsService,
+    this.settings,
     this.enablePlatformInit = true,
   });
 
   final AskService? askService;
   final SessionWebSocketService? wsService;
+  final TtsService? ttsService;
+  final SettingsModel? settings;
   final bool enablePlatformInit;
 
   @override
@@ -43,6 +48,8 @@ class MyApp extends StatelessWidget {
         title: 'Vision Assistant',
         askService: askService,
         wsService: wsService,
+        ttsService: ttsService,
+        settings: settings,
         enablePlatformInit: enablePlatformInit,
       ),
     );
@@ -55,12 +62,16 @@ class MyHomePage extends StatefulWidget {
     required this.title,
     this.askService,
     this.wsService,
+    this.ttsService,
+    this.settings,
     this.enablePlatformInit = true,
   });
 
   final String title;
   final AskService? askService;
   final SessionWebSocketService? wsService;
+  final TtsService? ttsService;
+  final SettingsModel? settings;
   final bool enablePlatformInit;
 
   @override
@@ -82,10 +93,10 @@ class _MyHomePageState extends State<MyHomePage> {
   String _wsStatusText = "Initializing session...";
   final List<String> _eventLogs = [];
 
-  // Hold-to-talk recording + /v1/ask upload
+  // Hold-to-talk recording + /v1/ask upload + TTS (EN/AR/FR)
   late final AskService _askService;
-  FlutterTts? _tts;
-  final String _appLang = "en";
+  late final TtsService _ttsService;
+  late SettingsModel _settings;
   bool _isHolding = false;
   bool _isRecording = false;
   bool _isUploading = false;
@@ -94,18 +105,87 @@ class _MyHomePageState extends State<MyHomePage> {
   String _lastTranscript = "";
   String _spokenResponseText = "";
 
+  String get _appLang => AskService.normalizeLang(_settings.language);
+
   @override
   void initState() {
     super.initState();
+    _settings = widget.settings ?? SettingsModel();
     _wsService = widget.wsService ?? SessionWebSocketService();
+    _wsService.onEventReceived = _handleWsEvent;
     _askService =
         widget.askService ??
         AskService(baseUrlProvider: () => _wsService.activeBaseUrl);
+    _ttsService =
+        widget.ttsService ??
+        TtsService(
+          engine: widget.enablePlatformInit ? null : NoOpTtsEngineAdapter(),
+          settingsProvider: () => _settings,
+        );
     if (widget.enablePlatformInit) {
       WakelockPlus.enable();
-      _tts = FlutterTts();
+      if (widget.settings == null) {
+        _loadSavedSettings();
+      }
       _initializeCamera();
       _bootstrapAppSession();
+    }
+  }
+
+  Future<void> _loadSavedSettings() async {
+    try {
+      final loaded = await SettingsModel.load();
+      if (!mounted) return;
+      setState(() {
+        _settings = loaded;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _selectLanguage(String localeCode) async {
+    setState(() {
+      _settings.language = localeCode;
+    });
+    if (widget.enablePlatformInit) {
+      try {
+        await _settings.save();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _updateSpeechRate(double rate) async {
+    setState(() {
+      _settings.speechRate = double.parse(rate.toStringAsFixed(2));
+    });
+    if (widget.enablePlatformInit) {
+      try {
+        await _settings.save();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _handleWsEvent(Map<String, dynamic> eventData) async {
+    if (!mounted) return;
+    setState(() {
+      _eventLogs.insert(
+        0,
+        "[${eventData['type'] ?? 'event'}] ${eventData.toString()}",
+      );
+    });
+
+    // Design §6.1.2 & §6.6: Speak alerts unless recording, disabled, or an answer is speaking.
+    if (eventData['type'] == 'alert') {
+      if (_isHolding || _isRecording || !_settings.alertsEnabled) {
+        return;
+      }
+      final message = eventData['message']?.toString() ?? '';
+      final alertLang = eventData['lang']?.toString() ?? _appLang;
+      if (message.isEmpty) return;
+
+      if (!_ttsService.isSpeakingAnswer) {
+        HapticFeedback.heavyImpact();
+      }
+      await _ttsService.speakAlert(message, lang: alertLang);
     }
   }
 
@@ -165,16 +245,7 @@ class _MyHomePageState extends State<MyHomePage> {
           _wsStatusText = "Session established. Connecting WS...";
         });
 
-        _wsService.onEventReceived = (eventData) {
-          if (!mounted) return;
-          setState(() {
-            _eventLogs.insert(
-              0,
-              "[${eventData['type'] ?? 'event'}] ${eventData.toString()}",
-            );
-          });
-        };
-
+        _wsService.onEventReceived = _handleWsEvent;
         _wsService.connectWebSocket();
 
         setState(() {
@@ -190,31 +261,24 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  Future<void> _speak(String text, {String? lang}) async {
-    if (text.isEmpty || _tts == null) return;
-    try {
-      await _tts!.stop();
-      await _tts!.setLanguage(lang ?? _appLang);
-      await _tts!.speak(text);
-    } catch (_) {
-      // Ignore TTS channel errors in headless environments.
-    }
+  Future<void> _speakAnswer(String text, {String? lang}) async {
+    await _ttsService.speakAnswer(text, lang: lang ?? _appLang);
   }
 
   Future<void> _stopSpeech() async {
-    if (_tts == null) return;
-    try {
-      await _tts!.stop();
-    } catch (_) {}
+    await _ttsService.stop();
   }
 
   Future<void> _onHoldStart() async {
-    if (_isHolding || _isRecording || _isUploading) return;
+    // Barge-in: a new press immediately stops current speech (§6.1.2)
+    if (_isHolding || _isRecording || _isUploading) {
+      await _stopSpeech();
+      return;
+    }
     _isHolding = true;
     _askService.markHoldStart();
-
-    // Barge-in: new press stops current speech (§6.1.2)
     await _stopSpeech();
+
     HapticFeedback.mediumImpact();
     SystemSound.play(SystemSoundType.click);
 
@@ -309,7 +373,7 @@ class _MyHomePageState extends State<MyHomePage> {
         _lastTranscript = resp.transcript;
         _spokenResponseText = resp.answer;
       });
-      await _speak(resp.answer, lang: resp.lang);
+      await _speakAnswer(resp.answer, lang: resp.lang);
     } else {
       final speakText = result.spokenText;
       setState(() {
@@ -317,8 +381,119 @@ class _MyHomePageState extends State<MyHomePage> {
         _askStatusText = "Hold anywhere on the screen to ask a question";
         _spokenResponseText = speakText;
       });
-      await _speak(speakText, lang: _appLang);
+      await _speakAnswer(speakText, lang: _appLang);
     }
+  }
+
+  void _showSettingsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1F2937),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Semantics(
+                    header: true,
+                    label: 'Speech and alert settings',
+                    child: const Text(
+                      'Settings',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label:
+                        'Speech rate: ${_settings.speechRate.toStringAsFixed(2)}',
+                    child: Text(
+                      'Speech Rate: ${_settings.speechRate.toStringAsFixed(2)}',
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ),
+                  Semantics(
+                    slider: true,
+                    label: 'Adjust speech rate',
+                    child: Slider(
+                      key: const Key('speech_rate_slider'),
+                      value: _settings.speechRate.clamp(0.2, 1.0),
+                      min: 0.2,
+                      max: 1.0,
+                      divisions: 8,
+                      onChanged: (val) {
+                        setSheetState(() {});
+                        _updateSpeechRate(val);
+                      },
+                    ),
+                  ),
+                  Semantics(
+                    toggled: _settings.alertsEnabled,
+                    label: 'Obstacle alerts toggle',
+                    child: SwitchListTile(
+                      title: const Text(
+                        'Alerts Enabled',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      value: _settings.alertsEnabled,
+                      onChanged: (val) async {
+                        setSheetState(() {
+                          _settings.alertsEnabled = val;
+                        });
+                        setState(() {});
+                        if (widget.enablePlatformInit) {
+                          try {
+                            await _settings.save();
+                          } catch (_) {}
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildLangButton(String label, String localeCode, String shortLang) {
+    final bool isSelected = _appLang == shortLang;
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: 'Select $label language',
+      child: InkWell(
+        key: Key('lang_btn_$shortLang'),
+        onTap: () => _selectLanguage(localeCode),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.amberAccent : Colors.white12,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            shortLang.toUpperCase(),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: isSelected ? Colors.black : Colors.white,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -330,6 +505,7 @@ class _MyHomePageState extends State<MyHomePage> {
     _peerConnection?.dispose();
     _wsService.disconnect();
     _askService.dispose();
+    _ttsService.stop();
     super.dispose();
   }
 
@@ -407,8 +583,27 @@ class _MyHomePageState extends State<MyHomePage> {
         title: Semantics(
           header: true,
           label: widget.title,
-          child: Text(widget.title),
+          child: Text(
+            widget.title,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 16),
+          ),
         ),
+        actions: [
+          _buildLangButton('English', 'en-US', 'en'),
+          _buildLangButton('Arabic', 'ar', 'ar'),
+          _buildLangButton('French', 'fr-FR', 'fr'),
+          Semantics(
+            button: true,
+            label: 'Open speech and alert settings',
+            child: IconButton(
+              key: const Key('settings_button'),
+              icon: const Icon(Icons.settings, size: 20),
+              tooltip: 'Settings',
+              onPressed: _showSettingsSheet,
+            ),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Semantics(
