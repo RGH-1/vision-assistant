@@ -1,7 +1,6 @@
-
-
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -14,7 +13,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from server.common.text_norm import normalize_text
 
-
+HYBRID_SEARCH_SQL = (Path(__file__).with_name("queries.sql")).read_text(encoding="utf-8")
+TRIGRAM_SIMILARITY_THRESHOLD = 0.2
 
 
 def open_ingest_connection() -> psycopg.Connection:
@@ -31,13 +31,14 @@ def open_ingest_connection() -> psycopg.Connection:
 
     try:
         register_vector(conn)
+        conn.execute(f"SET pg_trgm.similarity_threshold = {TRIGRAM_SIMILARITY_THRESHOLD}")
+        conn.commit()
 
     except Exception:
         conn.close()
         raise
 
     return conn
-
 
 
 def create_web_pool() -> AsyncConnectionPool:
@@ -55,10 +56,53 @@ def create_web_pool() -> AsyncConnectionPool:
             "row_factory": dict_row,
             "connect_timeout": 5,
         },
-        configure=register_vector_async,  #let the adapter be registered on every connection it creates
+        configure=_configure_web_connection,
     )
 
     return pool
+
+
+async def _configure_web_connection(connection: Any) -> None:
+    """Configure vector adaptation and noisy-OCR matching for every web-pool connection."""
+    await register_vector_async(connection)
+    await connection.execute(f"SET pg_trgm.similarity_threshold = {TRIGRAM_SIMILARITY_THRESHOLD}")
+    await connection.commit()
+
+
+def hybrid_search_frames(
+    conn: psycopg.Connection,
+    session_id: UUID,
+    *,
+    time_from: datetime,
+    time_to: datetime,
+    clip_vector: np.ndarray,
+    text: str,
+    target_labels: list[str],
+    asked_at: datetime,
+) -> list[dict[str, Any]]:
+    """Return the top 30 time-bounded multimodal candidates for M3's final ranking."""
+    if time_from > time_to:
+        raise ValueError("time_from must not be after time_to")
+    vector = np.asarray(clip_vector, dtype=np.float32)
+    if vector.shape != (512,):
+        raise ValueError("clip_vector must contain exactly 512 numbers")
+    if not text:
+        text = ""
+    if any(not label for label in target_labels):
+        raise ValueError("target_labels cannot contain empty labels")
+
+    return conn.execute(
+        HYBRID_SEARCH_SQL,
+        {
+            "session_id": session_id,
+            "time_from": time_from,
+            "time_to": time_to,
+            "clip_vector": vector,
+            "text": normalize_text(text),
+            "target_labels": target_labels,
+            "asked_at": asked_at,
+        },
+    ).fetchall()
 
 
 def insert_frame(
@@ -72,9 +116,7 @@ def insert_frame(
     )
 
     if clip_vector.shape != (512,):
-        raise ValueError(
-            "clip_emb must contain exactly 512 numbers"
-        )
+        raise ValueError("clip_emb must contain exactly 512 numbers")
 
     # Prepare values for the SQL query.
     params = {
@@ -174,7 +216,7 @@ def list_frames(
     conn: psycopg.Connection,
     session_id: UUID,
     limit: int = 50,
-    offset: int = 0, #Specifies how many matching frames to skip
+    offset: int = 0,  # Specifies how many matching frames to skip
 ) -> list[dict[str, Any]]:
 
     if limit <= 0:
@@ -268,7 +310,6 @@ def insert_question(
     return result["id"]
 
 
-
 def insert_alert(
     conn: psycopg.Connection,
     alert: dict[str, Any],
@@ -326,8 +367,12 @@ def list_dashboard_frames(
             f.id AS frame_id,
             f.captured_at,
             f.thumb_path,
-            COALESCE(array_agg(DISTINCT d.label) FILTER (WHERE d.label IS NOT NULL), '{}') AS labels,
-            COALESCE(NULLIF(left(string_agg(DISTINCT o.text, ' '), 160), ''), f.scene_text) AS text_preview,
+            COALESCE(
+                array_agg(DISTINCT d.label) FILTER (WHERE d.label IS NOT NULL), '{}'
+            ) AS labels,
+            COALESCE(
+                NULLIF(left(string_agg(DISTINCT o.text, ' '), 160), ''), f.scene_text
+            ) AS text_preview,
             f.keep_reason
         FROM frames AS f
         LEFT JOIN detections AS d ON d.frame_id = f.id
@@ -425,7 +470,9 @@ def list_questions_with_evidence(
         """,
         (question_ids,),
     ).fetchall()
-    evidence_by_question: dict[int, list[dict[str, Any]]] = {question_id: [] for question_id in question_ids}
+    evidence_by_question: dict[int, list[dict[str, Any]]] = {
+        question_id: [] for question_id in question_ids
+    }
     for item in evidence:
         evidence_by_question[item["question_id"]].append(item)
     for question in questions:
