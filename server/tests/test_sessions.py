@@ -12,11 +12,17 @@ from psycopg import Connection
 
 from server import main
 from server.common.db import insert_alert, insert_frame, insert_question, open_ingest_connection
+from server.ingest.faceblur import FaceBlurResult
 from server.main import create_app
 from server.settings import Settings
 
 CONSENT_VER = "test-va-62"
 NEW_SESSION = {"app_lang": "en", "consent_at": "2026-11-06T10:00:00Z", "consent_ver": CONSENT_VER}
+
+
+class FakeFaceBlurrer:
+    def blur(self, image: np.ndarray) -> FaceBlurResult:
+        return FaceBlurResult(image.copy(), 0)
 
 
 @pytest.fixture(scope="module")
@@ -53,6 +59,7 @@ def client(data_dir: Path) -> Iterator[TestClient]:
         gemini_model="stub",
         gemini_timeout_s=1,
         gemini_temperature=0.2,
+        default_window_s=180,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
     options = {"loop_factory": asyncio.SelectorEventLoop}
@@ -164,7 +171,9 @@ def test_end_keeps_the_data_and_the_first_end_time(
 ) -> None:
     session_id = new_session(client)
     files = add_session_data(db, session_id, data_dir, "kept")
-    client.app.state.live_buffer.add(np.zeros((540, 960, 3), dtype=np.uint8), 1.0)
+    client.app.state.live_buffer.add(
+        np.zeros((540, 960, 3), dtype=np.uint8), 1.0, face_blurrer=FakeFaceBlurrer()
+    )
 
     assert client.post(f"/v1/sessions/{session_id}/end").status_code == 204
     first_end = session_row(db, session_id)["ended_at"]
@@ -184,7 +193,9 @@ def test_delete_leaves_no_rows_or_files_and_spares_other_sessions(
     other_files = add_session_data(db, other, data_dir, "other")
     session_id = new_session(client)
     files = add_session_data(db, session_id, data_dir, "deleted")
-    client.app.state.live_buffer.add(np.zeros((540, 960, 3), dtype=np.uint8), 1.0)
+    client.app.state.live_buffer.add(
+        np.zeros((540, 960, 3), dtype=np.uint8), 1.0, face_blurrer=FakeFaceBlurrer()
+    )
 
     assert client.delete(f"/v1/sessions/{session_id}").status_code == 204
 

@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections.abc import Iterator
+from datetime import timedelta
 from typing import Any, get_args
 from uuid import UUID, uuid4
 
@@ -13,11 +14,12 @@ from fastapi.testclient import TestClient
 from psycopg import Connection
 
 from server import main
-from server.assistant import gemini, stt
+from server.assistant import gate, gemini, stt
 from server.common.db import open_ingest_connection
 from server.common.schemas import AskResponse, Error, Lang, QueryAnsweredMessage
+from server.ingest.faceblur import FaceBlurResult
 from server.main import create_app
-from server.routes.ask import CANT_SEE, WENT_WRONG
+from server.routes.ask import CANT_SEE, NO_FRENCH, WENT_WRONG
 from server.settings import Settings
 
 CONSENT_VER = "test-va-64"
@@ -38,6 +40,11 @@ class IdleIngestWorker:
 
     def stop(self) -> None:
         pass
+
+
+class FakeFaceBlurrer:
+    def blur(self, image: np.ndarray) -> FaceBlurResult:
+        return FaceBlurResult(image.copy(), 0)
 
 
 @pytest.fixture(scope="module")
@@ -68,6 +75,7 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
         gemini_model="test-gemini",
         gemini_timeout_s=1,
         gemini_temperature=0.2,
+        default_window_s=180,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
     options = {"loop_factory": asyncio.SelectorEventLoop}
@@ -83,7 +91,9 @@ def session_id(client: TestClient, db: Connection) -> Iterator[str]:
     body = {"app_lang": "en", "consent_at": "2026-11-08T10:00:00Z", "consent_ver": CONSENT_VER}
     created = client.post("/v1/sessions", json=body).json()["session_id"]
     # A new session empties the live buffer, so the frame goes in after it.
-    client.app.state.live_buffer.add(np.zeros((540, 960, 3), np.uint8), time.monotonic() - 2)
+    client.app.state.live_buffer.add(
+        np.zeros((540, 960, 3), np.uint8), time.monotonic() - 2, face_blurrer=FakeFaceBlurrer()
+    )
     client.app.state.stream_connected = True
     yield created
     db.execute("DELETE FROM sessions WHERE consent_ver = %s", (CONSENT_VER,))
@@ -118,8 +128,10 @@ def ask_by_voice(client: TestClient, session_id: str, lang: str = "en") -> httpx
     )
 
 
-def ask_by_text(client: TestClient, session_id: str, lang: str = "en") -> httpx.Response:
-    body = {"session_id": session_id, "text": QUESTION, "lang": lang}
+def ask_by_text(
+    client: TestClient, session_id: str, lang: str = "en", text: str = QUESTION
+) -> httpx.Response:
+    body = {"session_id": session_id, "text": text, "lang": lang}
     return client.post("/v1/ask_text", json=body)
 
 
@@ -148,7 +160,7 @@ def test_text_question_is_answered_from_the_live_frame(
     )
     assert answer.evidence[0].frame_id is None
     assert answer.evidence[0].seconds_ago >= 2
-    assert set(answer.timings_ms) == {"gemini", "total"}
+    assert set(answer.timings_ms) == {"understand", "gemini", "total"}
     assert gemini_calls[0]["question"] == QUESTION
     assert gemini_calls[0]["jpeg"].startswith(b"\xff\xd8")  # a JPEG from the live buffer
     [row] = saved_questions(db, session_id)
@@ -271,7 +283,9 @@ def test_without_a_live_frame_the_reply_says_the_camera_is_off(
     if not frames:
         client.app.state.live_buffer.clear()
 
-    assert_error(ask_by_text(client, session_id, "fr"), 503, "NO_STREAM", CANT_SEE["fr"])
+    response = ask_by_text(client, session_id, "ar", "شو في قدامي؟")
+
+    assert_error(response, 503, "NO_STREAM", CANT_SEE["ar"])
     assert not gemini_calls
 
 
@@ -306,4 +320,91 @@ def test_voice_question_without_audio_is_a_bad_request(client: TestClient, sessi
 
 
 def test_every_language_has_its_spoken_replies() -> None:
-    assert set(CANT_SEE) == set(WENT_WRONG) == set(gemini.LANGUAGE_NAMES) == set(get_args(Lang))
+    langs = set(get_args(Lang))
+    assert set(CANT_SEE) == set(WENT_WRONG) == set(gemini.LANGUAGE_NAMES) == langs
+    assert set(gate.NOT_SURE) == langs
+    assert all(set(reply) == langs for reply in gate.FIXED_REPLIES.values())
+
+
+@pytest.mark.parametrize(
+    ("lang", "text", "intent"),
+    [
+        ("en", "Who is this?", "IDENTITY"),
+        ("ar", "مين هيدا؟", "IDENTITY"),
+        ("en", "What's the capital of France?", "OUT_OF_SCOPE"),
+    ],
+)
+def test_identity_and_out_of_scope_get_a_fixed_reply_without_gemini(
+    client: TestClient,
+    db: Connection,
+    session_id: str,
+    gemini_calls: list[dict[str, Any]],
+    lang: str,
+    text: str,
+    intent: str,
+) -> None:
+    response = ask_by_text(client, session_id, lang, text)
+
+    assert response.status_code == 200
+    answer = AskResponse.model_validate(response.json())
+    assert (answer.intent, answer.answer, answer.confidence, answer.abstained) == (
+        intent,
+        gate.FIXED_REPLIES[intent][lang],
+        "none",
+        True,
+    )
+    assert answer.evidence == []
+    assert not gemini_calls
+    [row] = saved_questions(db, session_id)
+    assert (row["intent"], row["model"]) == (intent, "rule")
+
+
+def test_a_memory_question_with_no_evidence_is_not_sure_without_gemini(
+    client: TestClient, db: Connection, session_id: str, gemini_calls: list[dict[str, Any]]
+) -> None:
+    response = ask_by_text(client, session_id, "en", "Did you see a fire extinguisher?")
+
+    answer = AskResponse.model_validate(response.json())
+    assert (answer.intent, answer.answer, answer.confidence, answer.abstained) == (
+        "FIND_OBJECT",
+        gate.NOT_SURE["en"],
+        "none",
+        True,
+    )
+    assert not gemini_calls
+    [row] = saved_questions(db, session_id)
+    assert row["model"] == "template"
+    # The window understand() chose is saved for the report: the whole 30-minute retention.
+    assert (row["t_to"], row["t_from"]) == (
+        row["asked_at"],
+        row["asked_at"] - timedelta(minutes=30),
+    )
+
+
+@pytest.mark.parametrize(("connected", "model"), [(True, "test-gemini"), (False, "template")])
+def test_a_question_nothing_matches_uses_the_live_frame_when_there_is_one(
+    client: TestClient,
+    db: Connection,
+    session_id: str,
+    gemini_calls: list[dict[str, Any]],
+    connected: bool,
+    model: str,
+) -> None:
+    client.app.state.stream_connected = connected
+
+    answer = AskResponse.model_validate(ask_by_text(client, session_id, "en", "Hmm, okay").json())
+
+    assert answer.intent == "MEMORY"
+    assert len(gemini_calls) == connected
+    [row] = saved_questions(db, session_id)
+    assert row["model"] == model
+
+
+def test_french_is_refused_until_it_has_a_lexicon(
+    client: TestClient, db: Connection, session_id: str, gemini_calls: list[dict[str, Any]]
+) -> None:
+    response = ask_by_text(client, session_id, "fr", "Qui est-ce ?")
+
+    assert_error(response, 400, "BAD_REQUEST", NO_FRENCH)
+    assert not gemini_calls
+    assert not saved_questions(db, session_id)

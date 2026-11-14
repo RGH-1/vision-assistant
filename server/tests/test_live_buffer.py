@@ -4,7 +4,17 @@ import cv2
 import numpy as np
 import pytest
 
+from server.ingest.faceblur import FaceBlurResult
 from server.ingest.live_buffer import LiveBuffer
+
+
+class FakeFaceBlurrer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def blur(self, image: np.ndarray) -> FaceBlurResult:
+        self.calls += 1
+        return FaceBlurResult(image.copy(), 0)
 
 
 def sharp_frame(value: int) -> np.ndarray:
@@ -15,8 +25,11 @@ def sharp_frame(value: int) -> np.ndarray:
 
 def test_buffer_encodes_jpegs_and_returns_sharpest_of_five() -> None:
     buffer = LiveBuffer()
+    blurrer = FakeFaceBlurrer()
     for captured_at, value in enumerate((5, 15, 30, 60, 10, 90)):
-        buffer.add(sharp_frame(value), float(captured_at), [{"label": "door"}])
+        buffer.add(
+            sharp_frame(value), float(captured_at), [{"label": "door"}], face_blurrer=blurrer
+        )
 
     selected = buffer.get_sharpest()
 
@@ -27,17 +40,19 @@ def test_buffer_encodes_jpegs_and_returns_sharpest_of_five() -> None:
     assert sharpness > 0
     assert decoded.shape[1] == 960
     assert detections == ({"label": "door"},)
+    assert blurrer.calls == 6
 
 
 def test_concurrent_writer_and_reader_do_not_error() -> None:
     buffer = LiveBuffer()
+    blurrer = FakeFaceBlurrer()
     errors: list[Exception] = []
     finished = threading.Event()
 
     def writer() -> None:
         try:
             for captured_at in range(100):
-                buffer.add(sharp_frame(captured_at), float(captured_at))
+                buffer.add(sharp_frame(captured_at), float(captured_at), face_blurrer=blurrer)
         except Exception as error:  # pragma: no cover - asserted by the main thread
             errors.append(error)
         finally:
@@ -64,7 +79,7 @@ def test_concurrent_writer_and_reader_do_not_error() -> None:
 
 def test_clear_removes_all_live_frames() -> None:
     buffer = LiveBuffer()
-    buffer.add(sharp_frame(1), 1.0)
+    buffer.add(sharp_frame(1), 1.0, face_blurrer=FakeFaceBlurrer())
 
     buffer.clear()
 
@@ -77,9 +92,9 @@ def test_get_sharpest_rejects_non_positive_window() -> None:
         LiveBuffer().get_sharpest(0)
 
 
-
 def test_get_sharpest_selects_from_last_five() -> None:
     buffer = LiveBuffer()
+    blurrer = FakeFaceBlurrer()
 
     # Create a plain black image with very low sharpness.
     flat = np.zeros((100, 100, 3), dtype=np.uint8)
@@ -94,15 +109,15 @@ def test_get_sharpest_selects_from_last_five() -> None:
     )
 
     # Add two old sharp frames.
-    buffer.add(sharp, 0.0)
-    buffer.add(sharp, 1.0)
+    buffer.add(sharp, 0.0, face_blurrer=blurrer)
+    buffer.add(sharp, 1.0, face_blurrer=blurrer)
 
     # Add the five most recent frames.
-    buffer.add(flat, 2.0)
-    buffer.add(flat, 3.0)
-    buffer.add(sharp, 4.0)
-    buffer.add(flat, 5.0)
-    buffer.add(flat, 6.0)
+    buffer.add(flat, 2.0, face_blurrer=blurrer)
+    buffer.add(flat, 3.0, face_blurrer=blurrer)
+    buffer.add(sharp, 4.0, face_blurrer=blurrer)
+    buffer.add(flat, 5.0, face_blurrer=blurrer)
+    buffer.add(flat, 6.0, face_blurrer=blurrer)
 
     # Only the last five frames should be considered.
     result = buffer.get_sharpest(n=5)

@@ -10,6 +10,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from server.ingest.faceblur import FaceBlurrer
+
 type Detection = dict[str, Any]
 type LiveFrame = tuple[float, bytes, float, tuple[Detection, ...]]
 
@@ -26,9 +28,11 @@ class LiveBuffer:
         frame: np.ndarray,
         captured_at: float,
         detections: Sequence[Detection] = (),
+        *,
+        face_blurrer: FaceBlurrer,
     ) -> None:
-        """Encode one sampled frame without blocking readers from a partial write."""
-        resized = self._resize(frame)
+        """Blur before encoding one sampled frame for a live question (§6.3.6)."""
+        resized = self._resize(face_blurrer.blur(frame).image)
         gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
         sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
         ok, encoded = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 80])

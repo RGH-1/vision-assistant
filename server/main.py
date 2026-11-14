@@ -18,6 +18,7 @@ from server.common.embeddings import ClipTextEncoder
 from server.common.schemas import Error, ErrorCode, ErrorDetail, Status
 from server.events import EventHub
 from server.ingest.live_buffer import LiveBuffer
+from server.ingest.faceblur import FaceBlurrer, load_face_blur_config
 from server.ingest.worker import IngestSource, IngestWorker
 from server.routes import ask, sessions, ws
 from server.settings import Settings
@@ -84,26 +85,32 @@ async def publish_pings(hub: EventHub, interval_s: float) -> None:
         hub.publish({"type": "ping"})
 
 
+
 def create_ingest_worker(app: FastAPI) -> IngestWorker:
     """Build the worker after the asyncio hub and live buffer exist (§5.3)."""
     settings: Settings = app.state.settings
 
     def connection_event(connected: bool) -> dict[str, Any]:
         app.state.stream_connected = connected
-        # Runs on the ingest thread, which can't use the web pool, so it reuses the last numbers
-        # instead of blanking them on the dashboard. §6.3.1 wants this event right away.
         status = app.state.last_status.model_dump()
         return {"type": "status", **status, "stream_connected": connected}
 
+    face_blurrer = FaceBlurrer(load_face_blur_config())
+
     return IngestWorker(
         IngestSource(settings.rtsp_url),
-        app.state.live_buffer.add,
+        lambda frame, captured_at: app.state.live_buffer.add(
+            frame,
+            captured_at,
+            face_blurrer=face_blurrer,
+        ),
         app.state.hub,
         connection_event_factory=connection_event,
         sample_hz=settings.sample_hz,
         no_frame_timeout_s=settings.ingest_no_frame_timeout_s,
         reconnect_delay_s=settings.ingest_reconnect_delay_s,
     )
+
 
 
 @asynccontextmanager

@@ -14,6 +14,7 @@ import psycopg
 
 from server.common.db import insert_frame
 from server.common.text_norm import normalize_text
+from server.ingest.faceblur import FaceBlurrer
 
 MAX_FRAME_SIDE = 1280
 THUMBNAIL_SIDE = 320
@@ -71,10 +72,12 @@ class FrameStore:
         self,
         data_dir: Path,
         connection: psycopg.Connection,
+        face_blurrer: FaceBlurrer,
         hub: EventPublisher | None = None,
     ) -> None:
         self._data_dir = data_dir
         self._connection = connection
+        self._face_blurrer = face_blurrer
         self._hub = hub
 
     def store(self, frame: ProcessedFrame) -> int:
@@ -82,9 +85,10 @@ class FrameStore:
         if frame.enhanced and frame.original is None:
             raise ValueError("enhanced frames must include their pre-enhancement original")
 
-        image = _resize_long_side(frame.image, MAX_FRAME_SIDE)
+        blurred = self._face_blurrer.blur(frame.image, frame.timings_ms)
+        image = _resize_long_side(blurred.image, MAX_FRAME_SIDE)
         original = (
-            _resize_long_side(frame.original, MAX_FRAME_SIDE)
+            _resize_long_side(self._face_blurrer.blur(frame.original).image, MAX_FRAME_SIDE)
             if frame.original is not None
             else None
         )
@@ -118,7 +122,7 @@ class FrameStore:
                         "enhance_ops": list(frame.enhance_ops),
                         "dhash": frame.dhash,
                         "keep_reason": frame.keep_reason,
-                        "faces_blurred": frame.faces_blurred,
+                        "faces_blurred": blurred.faces_blurred,
                         "scene_text": scene_text,
                         "clip_emb": frame.clip_emb,
                         "timings_ms": frame.timings_ms,
