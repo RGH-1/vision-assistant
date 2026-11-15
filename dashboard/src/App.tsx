@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, VisionAssistantApiClient } from './api/client';
+import { LiveStreamPanel } from './components/LiveStreamPanel';
 import { resolveDashboardConfig } from './config';
 import { useDashboardSocket } from './hooks/useDashboardSocket';
 import type { Lang } from './types/contracts';
@@ -225,83 +226,12 @@ export function App() {
 
       {/* Main 4-Panel Grid Layout (§6.7) */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Panel 1: Live Stream & System Status */}
-        <section
-          aria-labelledby="panel-live-title"
-          data-testid="panel-live-status"
-          className="rounded-xl border border-slate-800 bg-slate-900/70 p-5 flex flex-col gap-4"
-        >
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div>
-              <h2 id="panel-live-title" className="text-base font-semibold text-white">
-                1. Live Camera &amp; System Status
-              </h2>
-              <p className="text-xs text-slate-400">
-                WebRTC (WHEP) stream preview &amp; 2s telemetry from <code className="font-mono">/v1/ws/dashboard</code>
-              </p>
-            </div>
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                lastStatus?.stream_connected
-                  ? 'bg-emerald-500/20 text-emerald-300'
-                  : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              {lastStatus?.stream_connected ? 'Stream Live' : 'Stream Idle'}
-            </span>
-          </div>
-
-          {/* Live Video / WHEP Placeholder Box */}
-          <div className="aspect-video w-full rounded-lg border border-slate-800 bg-slate-950 flex flex-col items-center justify-center p-4 text-center">
-            <p className="text-sm font-medium text-slate-300" dir="auto">
-              Live WebRTC (WHEP) Stream Panel Placeholder
-            </p>
-            <p className="mt-1 text-xs font-mono text-slate-500">{config.whepUrl}</p>
-          </div>
-
-          {/* Live Status Telemetry Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-            <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5">
-              <span className="text-slate-400 block">Input / Analysed FPS</span>
-              <span className="font-mono text-sm font-semibold text-white">
-                {lastStatus ? `${lastStatus.input_fps} / ${lastStatus.analysed_fps}` : '0 / 0'}
-              </span>
-            </div>
-            <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5">
-              <span className="text-slate-400 block">Frames in DB</span>
-              <span className="font-mono text-sm font-semibold text-white">
-                {lastStatus?.frames_in_db ?? 0} ({lastStatus?.saved_per_min ?? 0}/min)
-              </span>
-            </div>
-            <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5">
-              <span className="text-slate-400 block">Retention / GPU</span>
-              <span className="font-mono text-sm font-semibold text-white">
-                {lastStatus?.retention_min ?? 30}m /{' '}
-                {lastStatus?.gpu_mem_mb != null ? `${lastStatus.gpu_mem_mb} MB` : 'N/A'}
-              </span>
-            </div>
-            <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5">
-              <span className="text-slate-400 block">Cloud Status</span>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span
-                  className={
-                    lastStatus?.groq_ok ? 'text-emerald-400 font-semibold' : 'text-slate-500'
-                  }
-                >
-                  Groq
-                </span>
-                <span className="text-slate-600">·</span>
-                <span
-                  className={
-                    lastStatus?.gemini_ok ? 'text-emerald-400 font-semibold' : 'text-slate-500'
-                  }
-                >
-                  Gemini
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
+        {/* Panel 1: Live Stream Viewer (WHEP + Iframe Fallback + Bounding Box Overlay + Telemetry) */}
+        <LiveStreamPanel
+          wsConnected={isConnected}
+          status={lastStatus}
+          defaultWhepUrl={config.whepUrl}
+        />
 
         {/* Panel 2: Frame Timeline & Hybrid Search */}
         <section
@@ -470,4 +400,3 @@ export function App() {
 }
 
 export default App;
-

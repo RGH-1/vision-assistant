@@ -1,9 +1,10 @@
 /**
  * Resolves the backend REST, WebSocket, and MediaMTX stream URLs.
  * Priority:
- * 1. URL query parameter (?server=http://... or ?serverUrl=http://...)
- * 2. Vite environment variable (VITE_SERVER_URL)
+ * 1. URL query parameter (?server=http://... or ?serverUrl=http://..., ?whep=http://...)
+ * 2. Vite environment variable (VITE_SERVER_URL, VITE_WHEP_URL)
  * 3. Current origin if served directly from FastAPI (:8000), otherwise http://localhost:8000
+ *    Default WHEP stream endpoint: http://192.168.8.111:8889/mystream/whep
  */
 
 export interface DashboardConfig {
@@ -12,6 +13,9 @@ export interface DashboardConfig {
   whepUrl: string;
   streamIframeUrl: string;
 }
+
+export const DEFAULT_MEDIAMTX_HOST = '192.168.8.111:8889';
+export const DEFAULT_STREAM_PATH = 'mystream';
 
 export function normalizeBaseUrl(rawUrl: string): string {
   return rawUrl.trim().replace(/\/+$/, '');
@@ -48,14 +52,7 @@ export function resolveDashboardConfig(
       defaultServer,
   );
 
-  let hostForStream = 'localhost';
-  try {
-    hostForStream = new URL(serverUrl).hostname || 'localhost';
-  } catch {
-    hostForStream = 'localhost';
-  }
-
-  const defaultWhepUrl = `http://${hostForStream}:8889/mystream/whep`;
+  const defaultWhepUrl = `http://${DEFAULT_MEDIAMTX_HOST}/${DEFAULT_STREAM_PATH}/whep`;
   const whepUrl = normalizeBaseUrl(
     (queryWhep && queryWhep.trim().length > 0 ? queryWhep : undefined) ??
       (envWhepUrl && envWhepUrl.trim().length > 0 ? envWhepUrl : undefined) ??
@@ -71,4 +68,3 @@ export function resolveDashboardConfig(
     streamIframeUrl,
   };
 }
-
