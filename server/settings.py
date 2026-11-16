@@ -36,6 +36,8 @@ class Settings(BaseModel):
     gemini_timeout_s: float
     gemini_temperature: float
     gemini_max_side: int
+    answer_max_sentences: int
+    answer_max_words: int
     evidence_min: float
     default_window_s: float
     gemini_cache_dir: Path | None = None  # set only by eval scripts, so reruns spend no quota
