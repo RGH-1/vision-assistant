@@ -118,3 +118,12 @@ frame_keep:
   canny_low: 100
   canny_high: 200
   window_seconds: 1
+ocr:
+  full_frame_max_side: 1280
+  crop_scale: 2
+  clahe_clip_limit: 2.0
+  clahe_tile_size: 8
+  denoise_h: 7
+  confidence_min: 0.4
+  min_text_length: 2
+  merge_iou: 0.5
