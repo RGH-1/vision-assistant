@@ -25,6 +25,7 @@ from server.common.schemas import (
     QuestionEvidence,
     TimingsMs,
 )
+from server.settings import Settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1")
@@ -50,6 +51,18 @@ def ask_error(status_code: int, code: ErrorCode, message: str, speak: str) -> JS
 
 def ms_since(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
+
+
+def stored_frames(ranked: list[retrieve.Ranked], settings: Settings) -> list[gemini.Frame]:
+    """The ranked frames' images for Gemini; a frame whose file is already deleted is skipped."""
+    frames = []
+    for hit in ranked:
+        jpeg = gemini.load_jpeg(settings.data_dir / hit.image_path, settings.gemini_max_side)
+        if jpeg is not None:
+            frames.append(
+                gemini.Frame(jpeg, hit.seconds_ago, hit.detections, hit.texts, hit.frame_id)
+            )
+    return frames
 
 
 async def check_session(request: Request, session_id: UUID) -> None:
@@ -81,31 +94,23 @@ async def answer_question(
         return ask_error(400, "BAD_REQUEST", "French is not supported yet.", NO_FRENCH)
     timings["understand"] = ms_since(understand_started)
 
+    settings: Settings = app.state.settings
     frame = app.state.live_buffer.get_sharpest() if app.state.stream_connected else None
     evidence: list[AskEvidence] = []
     stored: list[QuestionEvidence] = []  # evidence frames saved in Postgres
+    frames: list[gemini.Frame] = []  # what Gemini will look at
     confidence: Confidence
     if question.intent in gate.FIXED_REPLIES:
         answer, confidence, model = gate.FIXED_REPLIES[question.intent][lang], "none", "rule"
     elif question.intent in NOW_INTENTS and frame is None:
         return ask_error(503, "NO_STREAM", "The camera stream is not connected.", CANT_SEE[lang])
     elif question.intent in NOW_INTENTS or (question.use_live_frame and frame is not None):
-        # shortcut: READ_TEXT_NOW and the rule-7 fallback use the sharpest live frame only;
-        # sign-box frames (VA-72) and stored frames (VA-70) are added later.
+        # shortcut: READ_TEXT_NOW and the rule-7 fallback use the sharpest live frame only, not
+        # frames with sign boxes or stored frames (§6.5.2); add them if the eval shows misses.
         captured_at, jpeg, _, detections = frame
         seconds_ago = time.monotonic() - captured_at  # the ingest thread uses time.monotonic()
-        gemini_started = time.perf_counter()
-        try:
-            reply = await gemini.describe_live_scene(
-                jpeg, seconds_ago, detections, transcript, lang, app.state.settings
-            )
-        except Exception:
-            # Whatever failed (quota, timeout, bad JSON), the phone still needs something to say.
-            logger.exception("Gemini failed")
-            return ask_error(502, "GEMINI_FAILED", "Gemini did not answer.", WENT_WRONG[lang])
-        timings["gemini"] = ms_since(gemini_started)
-        answer, confidence, model = reply.answer, reply.confidence, app.state.settings.gemini_model
-        # shortcut: a single live frame has nothing to be ranked against; VA-70 adds scores.
+        frames = [gemini.Frame(jpeg, seconds_ago, detections)]
+        # shortcut: a single live frame has nothing to be ranked against, so its score is 1.
         evidence = [
             AskEvidence(frame_id=None, seconds_ago=round(seconds_ago, 1), thumb_url=None, score=1)
         ]
@@ -115,6 +120,9 @@ async def answer_question(
         clip_vector = await asyncio.to_thread(app.state.clip_text.encode, transcript)
         async with app.state.pool.connection() as conn:
             ranked = await retrieve.search_memory(conn, session_id, question, clip_vector, asked_at)
+        # Evidence gate: weak evidence gets "I'm not sure" below, without calling Gemini (§6.5.5).
+        if ranked and ranked[0].score >= settings.evidence_min:
+            frames = await asyncio.to_thread(stored_frames, ranked, settings)
         timings["retrieve"] = ms_since(retrieve_started)
         stored = [
             QuestionEvidence(
@@ -135,9 +143,23 @@ async def answer_question(
             )
             for hit in ranked
         ]
-        # shortcut: stored frames have no answer generator yet, so even good evidence gets
-        # "I'm not sure"; VA-72 sends frames scoring above EVIDENCE_MIN to Gemini (§6.5.5).
-        answer, confidence, model = gate.NOT_SURE[lang], "none", "template"
+        if not frames:
+            answer, confidence, model = gate.NOT_SURE[lang], "none", "template"
+
+    if frames:
+        gemini_started = time.perf_counter()
+        window = gemini.time_window(question.t_from, question.t_to, asked_at)
+        try:
+            reply, model = await gemini.answer(
+                frames, transcript, question.intent, window, lang, settings
+            )
+        except Exception:
+            # Whatever failed (quota, timeout, bad JSON), the phone still needs something to say.
+            # shortcut: no template answer from stored objects yet; VA-74 adds it (§10.3).
+            logger.exception("Gemini failed")
+            return ask_error(502, "GEMINI_FAILED", "Gemini did not answer.", WENT_WRONG[lang])
+        timings["gemini"] = ms_since(gemini_started)
+        answer, confidence = reply.answer, reply.confidence
 
     timings["total"] = ms_since(started)
     # shortcut: only the prompt keeps "safe" out of answers until the safety filter (VA-73).
