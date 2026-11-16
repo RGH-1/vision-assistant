@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import numpy as np
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,8 +18,9 @@ from server.common.db import create_web_pool
 from server.common.embeddings import ClipTextEncoder
 from server.common.schemas import Error, ErrorCode, ErrorDetail, Status
 from server.events import EventHub
-from server.ingest.live_buffer import LiveBuffer
 from server.ingest.faceblur import FaceBlurrer, load_face_blur_config
+from server.ingest.live_buffer import LiveBuffer
+from server.ingest.pipeline import FramePipeline
 from server.ingest.worker import IngestSource, IngestWorker
 from server.routes import ask, sessions, ws
 from server.settings import Settings
@@ -85,7 +87,6 @@ async def publish_pings(hub: EventHub, interval_s: float) -> None:
         hub.publish({"type": "ping"})
 
 
-
 def create_ingest_worker(app: FastAPI) -> IngestWorker:
     """Build the worker after the asyncio hub and live buffer exist (§5.3)."""
     settings: Settings = app.state.settings
@@ -96,21 +97,25 @@ def create_ingest_worker(app: FastAPI) -> IngestWorker:
         return {"type": "status", **status, "stream_connected": connected}
 
     face_blurrer = FaceBlurrer(load_face_blur_config())
+    pipeline = FramePipeline(settings.data_dir, face_blurrer, app.state.hub)
+
+    def handle_frame(frame: np.ndarray, captured_at: float) -> None:
+        app.state.live_buffer.add(frame, captured_at, face_blurrer=face_blurrer)
+        try:
+            pipeline.process(frame, captured_at)
+        except Exception:
+            # Logged and skipped, so live questions keep working while storing frames fails.
+            logger.exception("Could not store a frame")
 
     return IngestWorker(
         IngestSource(settings.rtsp_url),
-        lambda frame, captured_at: app.state.live_buffer.add(
-            frame,
-            captured_at,
-            face_blurrer=face_blurrer,
-        ),
+        handle_frame,
         app.state.hub,
         connection_event_factory=connection_event,
         sample_hz=settings.sample_hz,
         no_frame_timeout_s=settings.ingest_no_frame_timeout_s,
         reconnect_delay_s=settings.ingest_reconnect_delay_s,
     )
-
 
 
 @asynccontextmanager
