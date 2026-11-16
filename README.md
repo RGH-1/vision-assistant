@@ -28,12 +28,14 @@ Course project — Multimedia Databases and Image Processing, 2026–2027. Demo:
 Requirements: Python **3.12** via [uv](https://docs.astral.sh/uv/), Docker Desktop, Node 20+, Flutter (Android), an NVIDIA GPU with CUDA.
 
 ```powershell
-copy .env.example .env        # then fill in your own API keys
-uv sync                       # creates .venv with Python 3.12
-uv run pytest                 # server tests
+copy .env.example .env          # then fill in your own API keys
+uv sync                         # creates .venv with Python 3.12
+uv run --env-file .env pytest   # server tests
 ```
 
 Start-up (`start.ps1`), firewall rules and the demo steps are added as those tasks land (design §5.2, §16).
+
+Commands for running and testing in PowerShell, Git Bash and cmd: [docs/commands.md](docs/commands.md).
 
 ## Branches
 
