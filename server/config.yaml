@@ -19,6 +19,16 @@ gemini_timeout_s: 30 # §6.4
 gemini_temperature: 0.2 # §6.5.4
 default_window_s: 180 # memory and past text with no time words look 3 min back (§6.5.2)
 
+ranking: # §6.5.3; starting weights, tuned on the test questions
+  recency_s: 60 # recency = exp(-seconds_ago / 60)
+  duplicate_s: 2 # a frame less than 2 s from a better one is a near-duplicate
+  duplicate_dhash_max: 8 # ... and so is one with dHash distance <= 8
+  keep: 3 # frames kept for the answer
+  weights:
+    READ_TEXT_PAST: {clip: 0.15, text: 0.55, obj: 0.05, rec: 0.20, q: 0.05}
+    MEMORY: {clip: 0.40, text: 0.20, obj: 0.15, rec: 0.20, q: 0.05}
+    FIND_OBJECT: {clip: 0.25, text: 0.05, obj: 0.50, rec: 0.15, q: 0.05}
+
 frame_selection:
   analysis_width: 640
   sharpness_min: 60

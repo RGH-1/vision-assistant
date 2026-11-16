@@ -1,5 +1,6 @@
-"""Ask routes: a question by voice or text, answered from the live camera (design §5.4, §8.1)."""
+"""Ask routes: a question by voice or text, answered from the live camera or memory (§5.4, §8.1)."""
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -10,7 +11,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from psycopg.types.json import Jsonb
 
-from server.assistant import gate, gemini, stt
+from server.assistant import gate, gemini, retrieve, stt
 from server.assistant.understand import understand
 from server.common.schemas import (
     AskEvidence,
@@ -21,6 +22,7 @@ from server.common.schemas import (
     ErrorCode,
     ErrorDetail,
     Lang,
+    QuestionEvidence,
     TimingsMs,
 )
 
@@ -81,6 +83,7 @@ async def answer_question(
 
     frame = app.state.live_buffer.get_sharpest() if app.state.stream_connected else None
     evidence: list[AskEvidence] = []
+    stored: list[QuestionEvidence] = []  # evidence frames saved in Postgres
     confidence: Confidence
     if question.intent in gate.FIXED_REPLIES:
         answer, confidence, model = gate.FIXED_REPLIES[question.intent][lang], "none", "rule"
@@ -107,9 +110,33 @@ async def answer_question(
             AskEvidence(frame_id=None, seconds_ago=round(seconds_ago, 1), thumb_url=None, score=1)
         ]
     else:
-        # The evidence gate: no candidates, so "I'm not sure" without calling Gemini (§6.5.5).
-        # shortcut: memory search (VA-70) isn't built yet, so memory questions have no candidates;
-        # VA-70 adds them and gates the ones that score below EVIDENCE_MIN.
+        retrieve_started = time.perf_counter()
+        # In a thread, because the CPU encoder would otherwise block every other request.
+        clip_vector = await asyncio.to_thread(app.state.clip_text.encode, transcript)
+        async with app.state.pool.connection() as conn:
+            ranked = await retrieve.search_memory(conn, session_id, question, clip_vector, asked_at)
+        timings["retrieve"] = ms_since(retrieve_started)
+        stored = [
+            QuestionEvidence(
+                frame_id=hit.frame_id,
+                rank=rank,
+                score=round(hit.score, 3),
+                parts=hit.parts,
+                thumb_url=hit.thumb_url,
+            )
+            for rank, hit in enumerate(ranked, start=1)
+        ]
+        evidence = [
+            AskEvidence(
+                frame_id=hit.frame_id,
+                seconds_ago=round(hit.seconds_ago, 1),
+                thumb_url=hit.thumb_url,
+                score=round(hit.score, 3),
+            )
+            for hit in ranked
+        ]
+        # shortcut: stored frames have no answer generator yet, so even good evidence gets
+        # "I'm not sure"; VA-72 sends frames scoring above EVIDENCE_MIN to Gemini (§6.5.5).
         answer, confidence, model = gate.NOT_SURE[lang], "none", "template"
 
     timings["total"] = ms_since(started)
@@ -143,6 +170,14 @@ async def answer_question(
             ),
         )
         question_id = (await cursor.fetchone())["id"]
+        for item in stored:
+            await conn.execute(
+                """
+                INSERT INTO question_evidence (question_id, frame_id, rank, score, parts)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (question_id, item.frame_id, item.rank, item.score, Jsonb(item.parts.model_dump())),
+            )
 
     # Out here so the row is committed before the dashboard hears about it.
     app.state.hub.publish(
@@ -164,8 +199,8 @@ async def answer_question(
             "safety_rewrite": False,  # nothing rewrites answers until the safety filter (VA-73)
             "model": model,
             "timings_ms": timings,
-            # shortcut: a live frame isn't stored, so it can't be evidence; VA-70 adds stored ones.
-            "evidence": [],
+            # A live frame isn't stored, so only stored frames are evidence here.
+            "evidence": [item.model_dump() for item in stored],
         }
     )
 
