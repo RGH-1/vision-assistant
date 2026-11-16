@@ -1,4 +1,4 @@
-"""VA-64 checks: /v1/ask and /v1/ask_text with the real database. Groq and Gemini are faked."""
+"""VA-64/72 checks: /v1/ask and /v1/ask_text with the real database. Groq and Gemini are faked."""
 
 import asyncio
 import time
@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
 from uuid import UUID, uuid4
 
+import cv2
 import httpx
 import numpy as np
 import pytest
@@ -86,8 +87,11 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
         stt_timeout_s=1,
         stt_min_avg_logprob=-0.5,
         gemini_model="test-gemini",
+        gemini_fallback_model="test-gemini-lite",
         gemini_timeout_s=1,
         gemini_temperature=0.2,
+        gemini_max_side=1024,
+        evidence_min=0.35,
         default_window_s=180,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
@@ -116,11 +120,11 @@ def session_id(client: TestClient, db: Connection) -> Iterator[str]:
 def gemini_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
 
-    async def fake(jpeg, seconds_ago, detections, question, lang, settings) -> gemini.GeminiAnswer:
-        calls.append({"jpeg": jpeg, "seconds_ago": seconds_ago, "question": question, "lang": lang})
-        return REPLY
+    async def fake(frames, question, intent, window, lang, settings) -> tuple[Any, str]:
+        calls.append({"frames": frames, "question": question, "window": window, "lang": lang})
+        return REPLY, settings.gemini_model
 
-    monkeypatch.setattr(gemini, "describe_live_scene", fake)
+    monkeypatch.setattr(gemini, "answer", fake)
     return calls
 
 
@@ -175,7 +179,9 @@ def test_text_question_is_answered_from_the_live_frame(
     assert answer.evidence[0].seconds_ago >= 2
     assert set(answer.timings_ms) == {"understand", "gemini", "total"}
     assert gemini_calls[0]["question"] == QUESTION
-    assert gemini_calls[0]["jpeg"].startswith(b"\xff\xd8")  # a JPEG from the live buffer
+    [frame] = gemini_calls[0]["frames"]
+    assert frame.jpeg.startswith(b"\xff\xd8")  # a JPEG from the live buffer
+    assert (frame.frame_id, gemini_calls[0]["window"]) == (None, "now")
     [row] = saved_questions(db, session_id)
     assert row["id"] == answer.question_id
     assert (row["input_mode"], row["stt_engine"], row["transcript"], row["model"]) == (
@@ -246,16 +252,18 @@ def test_answered_question_reaches_the_dashboard(
     }
 
 
-def test_low_confidence_counts_as_abstained(
-    client: TestClient, session_id: str, monkeypatch: pytest.MonkeyPatch
+def test_low_confidence_counts_as_abstained_and_the_model_that_answered_is_saved(
+    client: TestClient, db: Connection, session_id: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def unsure(*_: Any) -> gemini.GeminiAnswer:
-        return REPLY.model_copy(update={"confidence": "low"})
+    async def unsure_on_flash_lite(*_: Any) -> tuple[gemini.GeminiAnswer, str]:
+        return REPLY.model_copy(update={"confidence": "low"}), "test-gemini-lite"
 
-    monkeypatch.setattr(gemini, "describe_live_scene", unsure)
+    monkeypatch.setattr(gemini, "answer", unsure_on_flash_lite)
 
     answer = AskResponse.model_validate(ask_by_text(client, session_id).json())
     assert (answer.confidence, answer.abstained) == ("low", True)
+    [row] = saved_questions(db, session_id)
+    assert row["model"] == "test-gemini-lite"
 
 
 @pytest.mark.parametrize(
@@ -305,10 +313,10 @@ def test_without_a_live_frame_the_reply_says_the_camera_is_off(
 def test_gemini_failure_still_gets_a_spoken_reply(
     client: TestClient, db: Connection, session_id: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def failing(*_: Any) -> gemini.GeminiAnswer:
+    async def failing(*_: Any) -> tuple[gemini.GeminiAnswer, str]:
         raise RuntimeError("quota exceeded")
 
-    monkeypatch.setattr(gemini, "describe_live_scene", failing)
+    monkeypatch.setattr(gemini, "answer", failing)
 
     assert_error(ask_by_text(client, session_id), 502, "GEMINI_FAILED", WENT_WRONG["en"])
     assert not saved_questions(db, session_id)
@@ -455,6 +463,13 @@ def store_frame(
     return frame_id
 
 
+def write_image(client: TestClient, dhash: int) -> None:
+    """The JPEG store_frame's row points at, as FrameStore would have written it."""
+    path = client.app.state.settings.data_dir / "frames" / f"{dhash}.jpg"
+    path.parent.mkdir(exist_ok=True)
+    cv2.imwrite(str(path), np.zeros((540, 960, 3), np.uint8))
+
+
 def test_a_memory_question_saves_and_publishes_its_ranked_evidence(
     client: TestClient, db: Connection, session_id: str, gemini_calls: list[dict[str, Any]]
 ) -> None:
@@ -462,6 +477,13 @@ def test_a_memory_question_saves_and_publishes_its_ranked_evidence(
     store_frame(db, session_id, seconds_ago=60.5, dhash=-1, labels=[])  # 0.5 s from the keys
     chair = store_frame(db, session_id, seconds_ago=20, dhash=0xF0F0, labels=["chair"])
     store_frame(db, session_id, seconds_ago=40 * 60, dhash=-(2**40), labels=["keys"])  # too old
+    write_image(client, 0b0001)
+    write_image(client, 0xF0F0)
+    db.execute(
+        "INSERT INTO ocr_texts (frame_id, text, text_norm, confidence, bbox) "
+        "VALUES (%s, 'Room 204', 'room 204', 0.8, ARRAY[0, 0, 1, 1])",
+        (keys,),
+    )
 
     with client.websocket_connect("/v1/ws/dashboard") as dashboard:
         dashboard.send_json({"type": "ping"})
@@ -476,9 +498,15 @@ def test_a_memory_question_saves_and_publishes_its_ranked_evidence(
     assert answer.evidence[0].thumb_url == "/media/thumbs/1.jpg"
     assert answer.evidence[0].score > answer.evidence[1].score
     assert "retrieve" in answer.timings_ms
-    # shortcut: until VA-72 a memory answer is the template, even with good evidence.
-    assert (answer.answer, answer.abstained) == (gate.NOT_SURE["en"], True)
-    assert not gemini_calls
+    # Strong evidence, so Gemini answers from the kept frames and what ingest found in them.
+    assert (answer.answer, answer.abstained) == (REPLY.answer, False)
+    [call] = gemini_calls
+    assert [frame.frame_id for frame in call["frames"]] == [keys, chair]
+    keys_found = {"label": "keys", "position": "center", "confidence": 0.9}
+    assert call["frames"][0].detections == (keys_found,)
+    assert (call["frames"][0].texts, call["frames"][1].texts) == (("Room 204",), ())
+    assert call["window"] == "last 1800 seconds"  # the whole retention window
+    assert "gemini" in answer.timings_ms
     rows = db.execute(
         "SELECT frame_id, rank, score, parts FROM question_evidence WHERE question_id = %s "
         "ORDER BY rank",
@@ -492,3 +520,23 @@ def test_a_memory_question_saves_and_publishes_its_ranked_evidence(
         {**row, "thumb_url": item.thumb_url}
         for row, item in zip(rows, answer.evidence, strict=True)
     ]
+
+
+def test_weak_memory_evidence_is_not_sure_without_gemini(
+    client: TestClient, db: Connection, session_id: str, gemini_calls: list[dict[str, Any]]
+) -> None:
+    # The only frame in the window shows no keys and isn't recent, so it scores below
+    # EVIDENCE_MIN, and Gemini could only guess from it (§6.5.5).
+    chair = store_frame(db, session_id, seconds_ago=20 * 60, dhash=0xF0F0, labels=["chair"])
+    write_image(client, 0xF0F0)
+
+    answer = AskResponse.model_validate(
+        ask_by_text(client, session_id, "en", "Where did I leave my keys?").json()
+    )
+
+    assert [item.frame_id for item in answer.evidence] == [chair]
+    assert answer.evidence[0].score < client.app.state.settings.evidence_min
+    assert (answer.answer, answer.confidence) == (gate.NOT_SURE["en"], "none")
+    assert not gemini_calls
+    [row] = saved_questions(db, session_id)
+    assert row["model"] == "template"

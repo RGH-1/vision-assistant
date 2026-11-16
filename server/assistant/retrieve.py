@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from server.assistant.understand import Understanding
 from server.common.db import HYBRID_SEARCH_SQL
 from server.common.schemas import Intent, QuestionEvidenceParts
+from server.ingest.live_buffer import Detection
 from server.settings import CONFIG_PATH
 
 DHASH_BITS = 2**64 - 1  # dhash is stored as a signed BIGINT, so mask before counting bits
@@ -47,6 +48,10 @@ class Ranked:
     score: float
     parts: QuestionEvidenceParts
     thumb_url: str | None = None
+    # Filled in for the few kept frames only, for the answer (§6.5.3 step 5).
+    image_path: str | None = None
+    detections: tuple[Detection, ...] = ()
+    texts: tuple[str, ...] = ()
 
 
 def scaled(values: list[float]) -> list[float]:
@@ -127,13 +132,32 @@ async def search_memory(
     kept = rank(await cursor.fetchall(), question.intent)
     if not kept:
         return []
-    # shortcut: M2's query doesn't return thumb_path, so it's one more query for the top few;
-    # drop it once queries.sql selects win.thumb_path.
+    # One more query for the top few: their files, objects and text, which M2's search doesn't
+    # return.
     cursor = await conn.execute(
-        "SELECT id, thumb_path FROM frames WHERE id = ANY(%s)", ([c.frame_id for c in kept],)
+        """
+        SELECT f.id, f.thumb_path, f.image_path,
+               ARRAY(SELECT json_build_object('label', d.label, 'position', d.position,
+                                              'confidence', d.confidence)
+                     FROM detections AS d WHERE d.frame_id = f.id
+                     ORDER BY d.confidence DESC) AS detections,
+               ARRAY(SELECT o.text FROM ocr_texts AS o WHERE o.frame_id = f.id
+                     ORDER BY o.confidence DESC) AS texts
+        FROM frames AS f
+        WHERE f.id = ANY(%s)
+        """,
+        ([c.frame_id for c in kept],),
     )
-    thumbs = {row["id"]: row["thumb_path"] for row in await cursor.fetchall()}
+    found = {row["id"]: row for row in await cursor.fetchall()}
     # A frame retention deleted in between is skipped.
     return [
-        replace(c, thumb_url=f"/media/{thumbs[c.frame_id]}") for c in kept if c.frame_id in thumbs
+        replace(
+            c,
+            thumb_url=f"/media/{found[c.frame_id]['thumb_path']}",
+            image_path=found[c.frame_id]["image_path"],
+            detections=tuple(found[c.frame_id]["detections"]),
+            texts=tuple(found[c.frame_id]["texts"]),
+        )
+        for c in kept
+        if c.frame_id in found
     ]
