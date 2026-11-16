@@ -73,6 +73,8 @@ def settings(tmp_path: Path) -> Settings:
         gemini_timeout_s=1,
         gemini_temperature=0.2,
         gemini_max_side=1024,
+        answer_max_sentences=2,
+        answer_max_words=30,
         evidence_min=0.35,
         default_window_s=180,
         rtsp_url="rtsp://example.invalid/phone",

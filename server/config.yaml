@@ -18,6 +18,8 @@ stt_min_avg_logprob: -0.65 # measured: clear speech -0.06 to -0.20, muffled -0.7
 gemini_timeout_s: 30 # §6.4
 gemini_temperature: 0.2 # §6.5.4
 gemini_max_side: 1024 # images sent to Gemini are at most this long (§6.5.4)
+answer_max_sentences: 2 # spoken answers stay short (§6.5.4, Appendix A rule 4)
+answer_max_words: 30
 evidence_min: 0.35 # a best memory score below this gets "I'm not sure" without Gemini (§6.5.5)
 default_window_s: 180 # memory and past text with no time words look 3 min back (§6.5.2)
 

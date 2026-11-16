@@ -11,7 +11,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from psycopg.types.json import Jsonb
 
-from server.assistant import gate, gemini, retrieve, stt
+from server.assistant import gate, gemini, retrieve, safety, stt
 from server.assistant.understand import understand
 from server.common.schemas import (
     AskEvidence,
@@ -161,17 +161,21 @@ async def answer_question(
         timings["gemini"] = ms_since(gemini_started)
         answer, confidence = reply.answer, reply.confidence
 
+    answer = safety.shorten(answer, settings.answer_max_sentences, settings.answer_max_words)
+    answer, safety_rewrite = safety.rewrite(answer, lang)
+    if safety_rewrite:
+        # Counted in the report from questions.safety_rewrite; logged so it shows live too.
+        logger.warning("Safety filter rewrote a %s answer", question.intent)
     timings["total"] = ms_since(started)
-    # shortcut: only the prompt keeps "safe" out of answers until the safety filter (VA-73).
     abstained = confidence in ("low", "none")
 
     async with app.state.pool.connection() as conn:
         cursor = await conn.execute(
             """
             INSERT INTO questions (session_id, asked_at, input_mode, stt_engine, transcript, lang,
-                                   intent, t_from, t_to, answer, confidence, abstained, model,
-                                   timings_ms)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   intent, t_from, t_to, answer, confidence, abstained,
+                                   safety_rewrite, model, timings_ms)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -187,6 +191,7 @@ async def answer_question(
                 answer,
                 confidence,
                 abstained,
+                safety_rewrite,
                 model,
                 Jsonb(timings),
             ),
@@ -218,7 +223,7 @@ async def answer_question(
             "answer": answer,
             "confidence": confidence,
             "abstained": abstained,
-            "safety_rewrite": False,  # nothing rewrites answers until the safety filter (VA-73)
+            "safety_rewrite": safety_rewrite,
             "model": model,
             "timings_ms": timings,
             # A live frame isn't stored, so only stored frames are evidence here.
