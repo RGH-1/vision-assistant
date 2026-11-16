@@ -15,6 +15,7 @@ from server.common.db import open_ingest_connection
 from server.ingest.detection import Detection
 from server.ingest.faceblur import FaceBlurResult
 from server.ingest.pipeline import FramePipeline
+from server.ingest.store import StoredOcr
 
 KEYS = Detection("keys", 0.9, (0.4, 0.4, 0.6, 0.6), 0.04, "center")
 
@@ -27,6 +28,12 @@ class FakeDetector:
 class FakeClip:
     def encode(self, frame: np.ndarray, timings_ms: dict[str, float]) -> np.ndarray:
         return np.eye(1, 512, dtype=np.float32)[0]
+
+
+class FakeOcr:
+    def read(self, _: np.ndarray, __: tuple, timings_ms: dict[str, float]) -> tuple[StoredOcr, ...]:
+        timings_ms["ocr"] = 2.0
+        return (StoredOcr("Room 204", 0.9, (0.1, 0.1, 0.2, 0.2)),)
 
 
 class FakeFaceBlurrer:
@@ -78,7 +85,7 @@ def run(tmp_path: Path, db: Connection) -> Iterator[tuple[FramePipeline, FakeHub
         tmp_path,
         FakeFaceBlurrer(),
         hub,
-        models=lambda: (FakeDetector(), FakeClip()),
+        models=lambda: (FakeDetector(), FakeClip(), FakeOcr()),
         connect=lambda: connection,
     )
     yield pipeline, hub
@@ -118,6 +125,10 @@ def test_the_sharpest_frame_of_each_second_is_saved_with_its_objects(
         "SELECT label FROM detections WHERE frame_id = %s", (rows[0]["id"],)
     ).fetchall()
     assert [row["label"] for row in labels] == ["keys"]
+    ocr = db.execute(
+        "SELECT text, text_norm FROM ocr_texts WHERE frame_id = %s", (rows[0]["id"],)
+    ).fetchall()
+    assert ocr == [{"text": "Room 204", "text_norm": "room 204"}]
     assert [event["frame_id"] for event in hub.events] == [row["id"] for row in rows]
 
 

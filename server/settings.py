@@ -56,6 +56,7 @@ def load_settings() -> Settings:
     config.pop("frame_selection")  # loaded directly by server.ingest.selection
     config.pop("frame_enhancement")  # loaded directly by server.ingest.enhance
     config.pop("frame_keep")  # loaded directly by server.ingest.keep
+    config.pop("ocr")  # loaded directly by server.ingest.ocr
     config.pop("frame_novelty")  # loaded directly by server.ingest.novelty
     config.pop("face_blur")  # loaded directly by server.ingest.faceblur
     config.pop("object_detection")  # loaded directly by server.ingest.detection
