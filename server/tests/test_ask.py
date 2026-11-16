@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from psycopg import Connection
 
 from server import main
-from server.assistant import gate, gemini, stt
+from server.assistant import gate, gemini, safety, stt
 from server.common.db import insert_frame, open_ingest_connection
 from server.common.schemas import AskResponse, Error, Lang, QueryAnsweredMessage
 from server.ingest.faceblur import FaceBlurResult
@@ -266,6 +266,30 @@ def test_low_confidence_counts_as_abstained_and_the_model_that_answered_is_saved
     assert (answer.confidence, answer.abstained) == ("low", True)
     [row] = saved_questions(db, session_id)
     assert row["model"] == "test-gemini-lite"
+
+
+def test_an_answer_that_says_safe_is_rewritten_saved_and_published_as_such(
+    client: TestClient, db: Connection, session_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def says_safe(*_: Any) -> tuple[gemini.GeminiAnswer, str]:
+        reply = "There is a door ahead. You can walk through it safely. It is open."
+        return REPLY.model_copy(update={"answer": reply}), "test-gemini"
+
+    monkeypatch.setattr(gemini, "answer", says_safe)
+
+    with client.websocket_connect("/v1/ws/dashboard") as dashboard:
+        dashboard.send_json({"type": "ping"})
+        assert dashboard.receive_json() == {"type": "pong"}  # the server has registered this client
+        response = ask_by_text(client, session_id)
+        client.app.state.hub.publish({"type": "ping"})  # so a missing event fails, not hangs
+        event = QueryAnsweredMessage.model_validate(dashboard.receive_json())
+
+    # Cut to 2 sentences first, then the unsafe one is replaced.
+    expected = f"There is a door ahead. {safety.CANE['en']}"
+    assert AskResponse.model_validate(response.json()).answer == expected
+    [row] = saved_questions(db, session_id)
+    assert (row["answer"], row["safety_rewrite"]) == (expected, True)
+    assert (event.answer, event.safety_rewrite) == (expected, True)
 
 
 @pytest.mark.parametrize(
