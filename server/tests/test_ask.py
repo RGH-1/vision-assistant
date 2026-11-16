@@ -3,7 +3,7 @@
 import asyncio
 import time
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
 from uuid import UUID, uuid4
 
@@ -15,7 +15,7 @@ from psycopg import Connection
 
 from server import main
 from server.assistant import gate, gemini, stt
-from server.common.db import open_ingest_connection
+from server.common.db import insert_frame, open_ingest_connection
 from server.common.schemas import AskResponse, Error, Lang, QueryAnsweredMessage
 from server.ingest.faceblur import FaceBlurResult
 from server.main import create_app
@@ -40,6 +40,19 @@ class IdleIngestWorker:
 
     def stop(self) -> None:
         pass
+
+
+class FakeClipText:
+    """Every question means the same thing, so stored frames are ranked by their own vectors."""
+
+    def encode(self, text: str) -> np.ndarray:
+        return unit_vector(0)
+
+
+def unit_vector(index: int) -> np.ndarray:
+    vector = np.zeros(512, np.float32)
+    vector[index] = 1
+    return vector
 
 
 class FakeFaceBlurrer:
@@ -80,7 +93,7 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
     options = {"loop_factory": asyncio.SelectorEventLoop}
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(main, "load_clip_text_encoder", lambda _: "clip-stub")
+        patch.setattr(main, "load_clip_text_encoder", lambda _: FakeClipText())
         patch.setattr(main, "create_ingest_worker", lambda _: IdleIngestWorker())
         with TestClient(create_app(settings), backend_options=options) as test_client:
             yield test_client
@@ -408,3 +421,74 @@ def test_french_is_refused_until_it_has_a_lexicon(
     assert_error(response, 400, "BAD_REQUEST", NO_FRENCH)
     assert not gemini_calls
     assert not saved_questions(db, session_id)
+
+
+def store_frame(
+    db: Connection, session_id: str, seconds_ago: float, dhash: int, labels: list[str]
+) -> int:
+    frame_id = insert_frame(
+        db,
+        {
+            "session_id": session_id,
+            "captured_at": datetime.now(UTC) - timedelta(seconds=seconds_ago),
+            "image_path": f"frames/{dhash}.jpg",
+            "thumb_path": f"thumbs/{dhash}.jpg",
+            "width": 960,
+            "height": 540,
+            "sharpness": 100.0,
+            "brightness": 120.0,
+            "contrast": 40.0,
+            "edge_density": 0.1,
+            "dhash": dhash,
+            "keep_reason": "novel",
+            "clip_emb": unit_vector(1),
+        },
+    )
+    for label in labels:
+        db.execute(
+            """
+            INSERT INTO detections (frame_id, label, confidence, bbox, area_ratio, position)
+            VALUES (%s, %s, 0.9, ARRAY[0, 0, 1, 1], 0.1, 'center')
+            """,
+            (frame_id, label),
+        )
+    return frame_id
+
+
+def test_a_memory_question_saves_and_publishes_its_ranked_evidence(
+    client: TestClient, db: Connection, session_id: str, gemini_calls: list[dict[str, Any]]
+) -> None:
+    keys = store_frame(db, session_id, seconds_ago=60, dhash=0b0001, labels=["keys"])
+    store_frame(db, session_id, seconds_ago=60.5, dhash=-1, labels=[])  # 0.5 s from the keys
+    chair = store_frame(db, session_id, seconds_ago=20, dhash=0xF0F0, labels=["chair"])
+    store_frame(db, session_id, seconds_ago=40 * 60, dhash=-(2**40), labels=["keys"])  # too old
+
+    with client.websocket_connect("/v1/ws/dashboard") as dashboard:
+        dashboard.send_json({"type": "ping"})
+        assert dashboard.receive_json() == {"type": "pong"}  # the server has registered this client
+        response = ask_by_text(client, session_id, "en", "Where did I leave my keys?")
+        client.app.state.hub.publish({"type": "ping"})  # so a missing event fails, not hangs
+        event = QueryAnsweredMessage.model_validate(dashboard.receive_json())
+
+    answer = AskResponse.model_validate(response.json())
+    assert answer.intent == "FIND_OBJECT"
+    assert [item.frame_id for item in answer.evidence] == [keys, chair]
+    assert answer.evidence[0].thumb_url == "/media/thumbs/1.jpg"
+    assert answer.evidence[0].score > answer.evidence[1].score
+    assert "retrieve" in answer.timings_ms
+    # shortcut: until VA-72 a memory answer is the template, even with good evidence.
+    assert (answer.answer, answer.abstained) == (gate.NOT_SURE["en"], True)
+    assert not gemini_calls
+    rows = db.execute(
+        "SELECT frame_id, rank, score, parts FROM question_evidence WHERE question_id = %s "
+        "ORDER BY rank",
+        (answer.question_id,),
+    ).fetchall()
+    assert [(row["frame_id"], row["rank"]) for row in rows] == [(keys, 1), (chair, 2)]
+    assert rows[0]["score"] == pytest.approx(answer.evidence[0].score)
+    assert rows[0]["parts"]["obj"] == 1  # the only frame in the window with keys
+    # The dashboard hears the same evidence, with the score parts that explain the ranking.
+    assert [item.model_dump() for item in event.evidence] == [
+        {**row, "thumb_url": item.thumb_url}
+        for row, item in zip(rows, answer.evidence, strict=True)
+    ]
