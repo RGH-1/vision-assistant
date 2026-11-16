@@ -86,8 +86,11 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
         stt_timeout_s=1,
         stt_min_avg_logprob=-0.5,
         gemini_model="test-gemini",
+        gemini_fallback_model="test-gemini-lite",
         gemini_timeout_s=1,
         gemini_temperature=0.2,
+        gemini_max_side=1024,
+        evidence_min=0.35,
         default_window_s=180,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.

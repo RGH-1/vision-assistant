@@ -32,9 +32,13 @@ class Settings(BaseModel):
     stt_timeout_s: float
     stt_min_avg_logprob: float
     gemini_model: str
+    gemini_fallback_model: str
     gemini_timeout_s: float
     gemini_temperature: float
+    gemini_max_side: int
+    evidence_min: float
     default_window_s: float
+    gemini_cache_dir: Path | None = None  # set only by eval scripts, so reruns spend no quota
 
 
 def load_env_file(path: Path) -> None:
@@ -67,5 +71,6 @@ def load_settings() -> Settings:
         sample_hz=float(os.environ.get("SAMPLE_HZ", "5")),
         stt_model=os.environ["STT_MODEL"],
         gemini_model=os.environ["GEMINI_MODEL"],
+        gemini_fallback_model=os.environ["GEMINI_FALLBACK_MODEL"],
         **config,
     )

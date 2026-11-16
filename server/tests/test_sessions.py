@@ -57,8 +57,11 @@ def client(data_dir: Path) -> Iterator[TestClient]:
         stt_timeout_s=1,
         stt_min_avg_logprob=-1.0,
         gemini_model="stub",
+        gemini_fallback_model="stub-lite",
         gemini_timeout_s=1,
         gemini_temperature=0.2,
+        gemini_max_side=1024,
+        evidence_min=0.35,
         default_window_s=180,
     )
     # Same event loop as server/__main__.py, because async psycopg can't use the Windows default.
