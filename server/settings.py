@@ -65,6 +65,7 @@ def load_settings() -> Settings:
     config.pop("frame_novelty")  # loaded directly by server.ingest.novelty
     config.pop("face_blur")  # loaded directly by server.ingest.faceblur
     config.pop("object_detection")  # loaded directly by server.ingest.detection
+    config.pop("retention")  # loaded directly by server.ingest.retention
     config.pop("ranking")  # loaded directly by server.assistant.retrieve
     return Settings(
         data_dir=ROOT / os.environ["DATA_DIR"],

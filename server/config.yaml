@@ -23,6 +23,12 @@ answer_max_words: 30
 evidence_min: 0.35 # a best memory score below this gets "I'm not sure" without Gemini (§6.5.5)
 default_window_s: 180 # memory and past text with no time words look 3 min back (§6.5.2)
 
+retention:
+  interval_seconds: 60 # §7.5: cleanup runs in the ingest thread once per minute
+  max_frame_count: 5000 # §7.5 safety cap
+  max_frame_bytes: 2147483648 # 2 GiB, §7.5 safety cap
+  question_retention_hours: 24 # §7.5: question text expires after one day
+
 ranking: # §6.5.3; starting weights, tuned on the test questions
   recency_s: 60 # recency = exp(-seconds_ago / 60)
   duplicate_s: 2 # a frame less than 2 s from a better one is a near-duplicate

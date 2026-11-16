@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from server.ingest.enhance import EnhancementResult, FrameEnhancer, load_frame_e
 from server.ingest.faceblur import FaceBlurrer
 from server.ingest.keep import FrameKeepCandidate, FrameKeepDecider, load_frame_keep_config
 from server.ingest.novelty import FrameNoveltySelector, load_frame_novelty_config
+from server.ingest.retention import RetentionJob
 from server.ingest.selection import FrameMetrics, FrameSelector, load_frame_selection_config
 from server.ingest.store import EventPublisher, FrameStore, ProcessedFrame
 
@@ -72,6 +74,7 @@ class FramePipeline:
         self._clip: Any = None
         self._connection: psycopg.Connection | None = None
         self._store: FrameStore | None = None
+        self._retention: RetentionJob | None = None
 
     def process(self, frame: np.ndarray, captured_at: float) -> None:
         if self._detector is None:
@@ -81,6 +84,14 @@ class FramePipeline:
             self._store = FrameStore(
                 self._data_dir, self._connection, self._face_blurrer, self._hub
             )
+            # Settings has loaded RETENTION_MINUTES before the ingest thread starts.
+            self._retention = RetentionJob(
+                self._data_dir,
+                self._connection,
+                retention_minutes=int(os.environ.get("RETENTION_MINUTES", "30")),
+            )
+
+        self._retention.run_if_due()
 
         window = math.floor(captured_at / self._window_s)
         if window != self._window:

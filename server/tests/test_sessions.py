@@ -223,7 +223,7 @@ def test_failed_file_delete_keeps_the_rows_and_can_be_retried(
         raise PermissionError("file in use")
 
     with monkeypatch.context() as patch:
-        patch.setattr("server.routes.sessions.delete_files", fail)
+        patch.setattr("server.routes.sessions.delete_frame_files", fail)
         with pytest.raises(PermissionError):
             client.delete(f"/v1/sessions/{session_id}")
     assert row_counts(db, session_id) == [1, 1, 1]
