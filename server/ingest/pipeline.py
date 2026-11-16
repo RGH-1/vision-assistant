@@ -22,6 +22,7 @@ from server.ingest.enhance import EnhancementResult, FrameEnhancer, load_frame_e
 from server.ingest.faceblur import FaceBlurrer
 from server.ingest.keep import FrameKeepCandidate, FrameKeepDecider, load_frame_keep_config
 from server.ingest.novelty import FrameNoveltySelector, load_frame_novelty_config
+from server.ingest.ocr import FrameOcr, load_ocr_config
 from server.ingest.retention import RetentionJob
 from server.ingest.selection import FrameMetrics, FrameSelector, load_frame_selection_config
 from server.ingest.store import EventPublisher, FrameStore, ProcessedFrame
@@ -37,8 +38,12 @@ class LiveCandidate(FrameKeepCandidate):
     timings_ms: dict[str, float]
 
 
-def load_models() -> tuple[Any, Any]:
-    return YoloeDetector(load_object_detection_config()), ClipImageEncoder()
+def load_models() -> tuple[Any, Any, Any]:
+    return (
+        YoloeDetector(load_object_detection_config()),
+        ClipImageEncoder(),
+        FrameOcr(load_ocr_config()),
+    )
 
 
 def wall_clock(captured_at: float) -> datetime:
@@ -55,7 +60,7 @@ class FramePipeline:
         face_blurrer: FaceBlurrer,
         hub: EventPublisher | None = None,
         *,
-        models: Callable[[], tuple[Any, Any]] = load_models,
+        models: Callable[[], tuple[Any, Any, Any]] = load_models,
         connect: Callable[[], psycopg.Connection] = open_ingest_connection,
     ) -> None:
         self._data_dir = data_dir
@@ -72,6 +77,7 @@ class FramePipeline:
         self._window: int | None = None
         self._detector: Any = None
         self._clip: Any = None
+        self._ocr: Any = None
         self._connection: psycopg.Connection | None = None
         self._store: FrameStore | None = None
         self._retention: RetentionJob | None = None
@@ -79,7 +85,7 @@ class FramePipeline:
     def process(self, frame: np.ndarray, captured_at: float) -> None:
         if self._detector is None:
             # Loaded on the first frame, so the models load in the ingest thread (§5.3).
-            self._detector, self._clip = self._models()
+            self._detector, self._clip, self._ocr = self._models()
             self._connection = self._connect()
             self._store = FrameStore(
                 self._data_dir, self._connection, self._face_blurrer, self._hub
@@ -138,7 +144,10 @@ class FramePipeline:
             return  # no session means no consent, so nothing is remembered (§9)
         timings_ms = dict(candidate.timings_ms)
         # CLIP sees the blurred frame, like every stage after the face blur in §6.3.1.
-        clip_emb = self._clip.encode(self._face_blurrer.blur(candidate.image).image, timings_ms)
+        blurred = self._face_blurrer.blur(candidate.image).image
+        stored_detections = tuple(d.as_stored_detection() for d in candidate.detections)
+        ocr = self._ocr.read(blurred, stored_detections, timings_ms)
+        clip_emb = self._clip.encode(blurred, timings_ms)
         enhancement = candidate.enhancement
         self._store.store(
             ProcessedFrame(
@@ -153,9 +162,8 @@ class FramePipeline:
                 keep_reason=candidate.keep_reason,
                 clip_emb=clip_emb,
                 timings_ms=timings_ms,
-                detections=tuple(d.as_stored_detection() for d in candidate.detections),
-                # shortcut: no OCR until VA-48, so stored frames have no text and past-text
-                # questions find nothing; VA-48 adds EasyOCR here.
+                detections=stored_detections,
+                ocr=ocr,
                 enhanced=enhancement.enhanced,
                 enhance_ops=enhancement.enhance_ops,
                 original=enhancement.original,
