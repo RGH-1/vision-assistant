@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 
 from server.common.schemas import SessionCreate, SessionCreated
+from server.ingest.retention import delete_frame_files
 
 router = APIRouter(prefix="/v1/sessions")
 
@@ -50,33 +51,27 @@ async def end_session(session_id: UUID, request: Request) -> None:
     request.app.state.live_buffer.clear()
 
 
-def delete_files(data_dir: Path, rows: list[dict[str, str | None]]) -> None:
-    for row in rows:
-        for stored_path in row.values():
-            if stored_path:
-                # missing_ok: a retry after a partial failure must not fail on files already gone.
-                (data_dir / stored_path).unlink(missing_ok=True)
+async def purge_session(conn: object, data_dir: Path, session_id: UUID) -> bool:
+    """Remove one session's media before cascading its rows, returning whether it existed."""
+    cursor = await conn.execute("SELECT id FROM sessions WHERE id = %s", (session_id,))
+    if await cursor.fetchone() is None:
+        return False
+    cursor = await conn.execute(
+        """
+        SELECT image_path, thumb_path, original_path FROM frames WHERE session_id = %s
+        """,
+        (session_id,),
+    )
+    frame_files = await cursor.fetchall()
+    # If this fails, the surrounding transaction leaves all rows for a safe retry.
+    await asyncio.to_thread(delete_frame_files, data_dir, frame_files)
+    await conn.execute("DELETE FROM sessions WHERE id = %s", (session_id,))
+    return True
 
 
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(session_id: UUID, request: Request) -> None:
     async with request.app.state.pool.connection() as conn:
-        cursor = await conn.execute(
-            """
-            DELETE FROM frames WHERE session_id = %s
-            RETURNING image_path, thumb_path, original_path
-            """,
-            (session_id,),
-        )
-        frame_files = await cursor.fetchall()
-
-        # Questions and alerts go with the session through ON DELETE CASCADE.
-        cursor = await conn.execute(
-            "DELETE FROM sessions WHERE id = %s RETURNING id", (session_id,)
-        )
-        if await cursor.fetchone() is None:
+        if not await purge_session(conn, request.app.state.settings.data_dir, session_id):
             raise HTTPException(status_code=404)
-
-        # Before the commit: if a file can't be deleted, the rows stay and a retry can finish.
-        await asyncio.to_thread(delete_files, request.app.state.settings.data_dir, frame_files)
     request.app.state.live_buffer.clear()
