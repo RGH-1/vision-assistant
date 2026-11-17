@@ -11,7 +11,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from psycopg.types.json import Jsonb
 
-from server.assistant import gate, gemini, retrieve, safety, stt
+from server.assistant import gate, gemini, retrieve, safety, stt, templates
 from server.assistant.understand import understand
 from server.common.schemas import (
     AskEvidence,
@@ -153,13 +153,18 @@ async def answer_question(
             reply, model = await gemini.answer(
                 frames, transcript, question.intent, window, lang, settings
             )
+            answer, confidence = reply.answer, reply.confidence
         except Exception:
-            # Whatever failed (quota, timeout, bad JSON), the phone still needs something to say.
-            # shortcut: no template answer from stored objects yet; VA-74 adds it (§10.3).
-            logger.exception("Gemini failed")
-            return ask_error(502, "GEMINI_FAILED", "Gemini did not answer.", WENT_WRONG[lang])
+            # Both models failed (quota, timeout, no network, bad JSON), so the answer is built
+            # from what ingest stored instead (§10.3).
+            logger.exception("Gemini failed, answering from a template")
+            top = frames[0]
+            if top.frame_id is None:
+                # A live frame carries no objects or text, so the newest stored frame is described.
+                async with app.state.pool.connection() as conn:
+                    top = await templates.latest_frame(conn, session_id, asked_at)
+            (answer, confidence), model = templates.describe(top, lang), "template"
         timings["gemini"] = ms_since(gemini_started)
-        answer, confidence = reply.answer, reply.confidence
 
     answer = safety.shorten(answer, settings.answer_max_sentences, settings.answer_max_words)
     answer, safety_rewrite = safety.rewrite(answer, lang)
