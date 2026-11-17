@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import math
 import os
 import time
@@ -14,6 +16,7 @@ from uuid import UUID
 
 import numpy as np
 import psycopg
+from psycopg.types.json import Jsonb
 
 from server.common.db import open_ingest_connection
 from server.ingest.detection import YoloeDetector, load_object_detection_config
@@ -21,11 +24,14 @@ from server.ingest.embeddings import ClipImageEncoder
 from server.ingest.enhance import EnhancementResult, FrameEnhancer, load_frame_enhancement_config
 from server.ingest.faceblur import FaceBlurrer
 from server.ingest.keep import FrameKeepCandidate, FrameKeepDecider, load_frame_keep_config
+from server.ingest.metrics import IngestMetrics
 from server.ingest.novelty import FrameNoveltySelector, load_frame_novelty_config
 from server.ingest.ocr import FrameOcr, load_ocr_config
 from server.ingest.retention import RetentionJob
 from server.ingest.selection import FrameMetrics, FrameSelector, load_frame_selection_config
 from server.ingest.store import EventPublisher, FrameStore, ProcessedFrame
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,12 +68,14 @@ class FramePipeline:
         *,
         models: Callable[[], tuple[Any, Any, Any]] = load_models,
         connect: Callable[[], psycopg.Connection] = open_ingest_connection,
+        metrics: IngestMetrics | None = None,
     ) -> None:
         self._data_dir = data_dir
         self._face_blurrer = face_blurrer
         self._hub = hub
         self._models = models
         self._connect = connect
+        self.metrics = metrics or IngestMetrics()
         self._selector = FrameSelector(load_frame_selection_config())
         self._enhancer = FrameEnhancer(load_frame_enhancement_config())
         self._novelty = FrameNoveltySelector(load_frame_novelty_config())
@@ -86,6 +94,7 @@ class FramePipeline:
         if self._detector is None:
             # Loaded on the first frame, so the models load in the ingest thread (§5.3).
             self._detector, self._clip, self._ocr = self._models()
+            self.metrics.record_gpu_mem(_cuda_allocated_bytes())
             self._connection = self._connect()
             self._store = FrameStore(
                 self._data_dir, self._connection, self._face_blurrer, self._hub
@@ -109,17 +118,22 @@ class FramePipeline:
         self._keep.consider(self._candidate(frame, captured_at), captured_at)
 
     def _candidate(self, frame: np.ndarray, captured_at: float) -> LiveCandidate | None:
-        selection = self._selector.select(frame)
+        timings_ms: dict[str, float] = {}
+        selection = _timed(timings_ms, "quality", self._selector.select, frame)
         if not selection.accepted:
             return None
-        enhancement = self._enhancer.enhance(
+        enhancement = _timed(
+            timings_ms,
+            "enhance",
+            self._enhancer.enhance,
             frame,
             brightness=selection.metrics.brightness,
             low_contrast="low_contrast" in selection.enhancement_reasons,
             slightly_soft=selection.unsharp_applied,
         )
-        timings_ms: dict[str, float] = {}
-        detections = self._detector.detect(enhancement.image, timings_ms)
+        detections = _timed(
+            timings_ms, "yoloe", self._detector.detect, enhancement.image, timings_ms
+        )
         # YOLOE runs before the dHash check (§6.3.1 draws it after), because the "new objects"
         # rule in §6.3.2 needs this frame's labels.
         labels = [detection.label for detection in detections]
@@ -144,12 +158,15 @@ class FramePipeline:
             return  # no session means no consent, so nothing is remembered (§9)
         timings_ms = dict(candidate.timings_ms)
         # CLIP sees the blurred frame, like every stage after the face blur in §6.3.1.
-        blurred = self._face_blurrer.blur(candidate.image).image
+        blurred = _timed(timings_ms, "face_blur", self._face_blurrer.blur, candidate.image).image
         stored_detections = tuple(d.as_stored_detection() for d in candidate.detections)
-        ocr = self._ocr.read(blurred, stored_detections, timings_ms)
-        clip_emb = self._clip.encode(blurred, timings_ms)
+        ocr = _timed(timings_ms, "ocr", self._ocr.read, blurred, stored_detections, timings_ms)
+        clip_emb = _timed(timings_ms, "clip", self._clip.encode, blurred, timings_ms)
         enhancement = candidate.enhancement
-        self._store.store(
+        frame_id = _timed(
+            timings_ms,
+            "store",
+            self._store.store,
             ProcessedFrame(
                 session_id=session_id,
                 captured_at=wall_clock(candidate.captured_at),
@@ -167,8 +184,15 @@ class FramePipeline:
                 enhanced=enhancement.enhanced,
                 enhance_ops=enhancement.enhance_ops,
                 original=enhancement.original,
-            )
+            ),
         )
+        with self._connection.transaction():
+            self._connection.execute(
+                "UPDATE frames SET timings_ms = %s WHERE id = %s", (Jsonb(timings_ms), frame_id)
+            )
+        self.metrics.record_saved()
+        self.metrics.record_gpu_mem(_cuda_allocated_bytes())
+        logger.info(json.dumps({"event": "frame_saved", "timings_ms": timings_ms}, sort_keys=True))
         labels = [detection.label for detection in candidate.detections]
         self._novelty.confirm_saved(candidate.dhash, labels, candidate.captured_at)
 
@@ -179,3 +203,21 @@ class FramePipeline:
                 "SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1"
             ).fetchone()
         return row["id"] if row else None
+
+
+def _timed(
+    timings_ms: dict[str, float], name: str, function: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    started_at = time.perf_counter()
+    try:
+        return function(*args, **kwargs)
+    finally:
+        timings_ms[name] = (time.perf_counter() - started_at) * 1000
+
+
+def _cuda_allocated_bytes() -> int | None:
+    try:
+        import torch
+    except ImportError:
+        return None
+    return int(torch.cuda.memory_allocated()) if torch.cuda.is_available() else None

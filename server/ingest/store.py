@@ -85,7 +85,9 @@ class FrameStore:
         if frame.enhanced and frame.original is None:
             raise ValueError("enhanced frames must include their pre-enhancement original")
 
-        blurred = self._face_blurrer.blur(frame.image, frame.timings_ms)
+        # The pipeline recorded its pre-OCR blur time; do not overwrite it during the disk guard.
+        blur_timings = {} if "face_blur" in frame.timings_ms else frame.timings_ms
+        blurred = self._face_blurrer.blur(frame.image, blur_timings)
         image = _resize_long_side(blurred.image, MAX_FRAME_SIDE)
         original = (
             _resize_long_side(self._face_blurrer.blur(frame.original).image, MAX_FRAME_SIDE)

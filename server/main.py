@@ -1,6 +1,7 @@
 """FastAPI app: startup, routes and error format (design §5.3, §6.4, §8.1)."""
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from server.common.schemas import Error, ErrorCode, ErrorDetail, Status
 from server.events import EventHub
 from server.ingest.faceblur import FaceBlurrer, load_face_blur_config
 from server.ingest.live_buffer import LiveBuffer
+from server.ingest.metrics import IngestMetrics
 from server.ingest.pipeline import FramePipeline
 from server.ingest.worker import IngestSource, IngestWorker
 from server.routes import ask, sessions, ws
@@ -51,17 +53,16 @@ async def read_status(app: FastAPI) -> Status:
         )
         row = await cursor.fetchone()
 
-    # shortcut: fps and GPU numbers stay empty until M2's ingest reports them, and groq_ok and
-    # gemini_ok stay false until VA-63 and VA-64 set them.
+    metrics = app.state.ingest_metrics.snapshot()
     return Status(
         session_id=row["session_id"],
         stream_connected=app.state.stream_connected,
-        input_fps=0,
-        analysed_fps=0,
-        saved_per_min=0,
+        input_fps=metrics.input_fps,
+        analysed_fps=metrics.analysed_fps,
+        saved_per_min=metrics.saved_per_min,
         frames_in_db=row["frames_in_db"],
         retention_min=app.state.settings.retention_minutes,
-        gpu_mem_mb=None,
+        gpu_mem_mb=metrics.gpu_mem_mb,
         last_answer_at=row["last_answer_at"],
         groq_ok=False,
         gemini_ok=False,
@@ -78,6 +79,9 @@ async def publish_status(app: FastAPI) -> None:
             logger.exception("Could not read status")
             continue
         app.state.last_status = status
+        logger.info(
+            json.dumps({"event": "ingest_status", **status.model_dump(mode="json")}, sort_keys=True)
+        )
         app.state.hub.publish({"type": "status", **status.model_dump()})
 
 
@@ -97,7 +101,9 @@ def create_ingest_worker(app: FastAPI) -> IngestWorker:
         return {"type": "status", **status, "stream_connected": connected}
 
     face_blurrer = FaceBlurrer(load_face_blur_config())
-    pipeline = FramePipeline(settings.data_dir, face_blurrer, app.state.hub)
+    pipeline = FramePipeline(
+        settings.data_dir, face_blurrer, app.state.hub, metrics=app.state.ingest_metrics
+    )
 
     def handle_frame(frame: np.ndarray, captured_at: float) -> None:
         app.state.live_buffer.add(frame, captured_at, face_blurrer=face_blurrer)
@@ -115,6 +121,7 @@ def create_ingest_worker(app: FastAPI) -> IngestWorker:
         sample_hz=settings.sample_hz,
         no_frame_timeout_s=settings.ingest_no_frame_timeout_s,
         reconnect_delay_s=settings.ingest_reconnect_delay_s,
+        metrics=app.state.ingest_metrics,
     )
 
 
@@ -125,6 +132,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.hub = hub
     app.state.live_buffer = LiveBuffer()
     app.state.stream_connected = False
+    app.state.ingest_metrics = IngestMetrics(rate_window_s=settings.status_interval_s)
 
     async with create_web_pool() as pool:
         app.state.pool = pool
@@ -186,6 +194,7 @@ async def handle_uncaught_error(request: Request, _: Exception) -> JSONResponse:
 def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="Vision Assistant", lifespan=lifespan)
     app.state.settings = settings
+    app.state.ingest_metrics = IngestMetrics(rate_window_s=settings.status_interval_s)
 
     app.add_middleware(
         CORSMiddleware,

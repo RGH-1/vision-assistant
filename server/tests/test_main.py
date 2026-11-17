@@ -17,6 +17,7 @@ from server import main
 from server.common.schemas import Error, Status
 from server.events import MESSAGES, EventHub
 from server.ingest.live_buffer import LiveBuffer
+from server.ingest.metrics import IngestMetrics
 from server.main import create_app
 from server.settings import ROOT, Settings, load_env_file
 
@@ -330,6 +331,7 @@ def test_connection_events_change_only_stream_connected(settings: Settings) -> N
     app = create_app(settings)
     app.state.hub = None
     app.state.live_buffer = LiveBuffer()
+    app.state.ingest_metrics = IngestMetrics()
     app.state.pool = FakePool()
     app.state.stream_connected = False
     status = asyncio.run(main.read_status(app))
@@ -341,3 +343,18 @@ def test_connection_events_change_only_stream_connected(settings: Settings) -> N
     assert message.stream_connected is True
     assert message.frames_in_db == 7
     assert asyncio.run(main.read_status(app)).stream_connected is True
+
+
+def test_status_uses_the_live_ingest_measurements(client: TestClient) -> None:
+    metrics = client.app.state.ingest_metrics
+    metrics.record_input()
+    metrics.record_input()
+    metrics.record_analysed()
+    metrics.record_saved()
+    metrics.record_gpu_mem(4 * 1024 * 1024)
+
+    status = client.get("/v1/status").json()
+
+    assert status["input_fps"] > status["analysed_fps"] > 0
+    assert status["saved_per_min"] == 1
+    assert status["gpu_mem_mb"] == 4

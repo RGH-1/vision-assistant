@@ -109,8 +109,8 @@ def test_the_sharpest_frame_of_each_second_is_saved_with_its_objects(
     pipeline.process(noise(4), base + 2.0)  # closes the second window
 
     rows = db.execute(
-        "SELECT id, captured_at, sharpness, keep_reason, image_path, thumb_path, clip_emb "
-        "FROM frames WHERE session_id = %s ORDER BY captured_at",
+        "SELECT id, captured_at, sharpness, keep_reason, image_path, thumb_path, clip_emb, "
+        "timings_ms FROM frames WHERE session_id = %s ORDER BY captured_at",
         (session_id,),
     ).fetchall()
     assert len(rows) == 2
@@ -121,6 +121,16 @@ def test_the_sharpest_frame_of_each_second_is_saved_with_its_objects(
     assert (tmp_path / rows[0]["image_path"]).is_file()
     assert (tmp_path / rows[0]["thumb_path"]).is_file()
     assert rows[0]["clip_emb"] is not None
+    assert set(rows[0]["timings_ms"]) == {
+        "quality",
+        "enhance",
+        "yoloe",
+        "face_blur",
+        "ocr",
+        "clip",
+        "store",
+    }
+    assert all(value >= 0 for value in rows[0]["timings_ms"].values())
     labels = db.execute(
         "SELECT label FROM detections WHERE frame_id = %s", (rows[0]["id"],)
     ).fetchall()
