@@ -2,6 +2,7 @@
 
 - `check_stt.py` — VA-63 check: transcribes the recordings in `data/stt_check/` with real Groq
 - `check_answers.py` — VA-72 check: asks a running server 10 questions (EN + AR) with real Gemini
+- `check_arabic.py` — VA-75 check: the 10 Arabic questions to ask on the phone, then a results table from what the server saved
 - Set `GROQ_API_KEY=bad` in the shell before `check_stt.py` or `check_ask.py` to test the VA-66 local fallback (the first run downloads the model)
 - `questions.csv` — 30–40 test questions: `video, ask_at_s, question, lang, intent, relevant_from_s, relevant_to_s, expected_answer, answerable`
 - `run.py` — streams a video and sends each question to `/v1/ask_text` at `ask_at_s`
