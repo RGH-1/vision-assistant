@@ -336,16 +336,73 @@ def test_without_a_live_frame_the_reply_says_the_camera_is_off(
     assert not gemini_calls
 
 
-def test_gemini_failure_still_gets_a_spoken_reply(
-    client: TestClient, db: Connection, session_id: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def fail_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     async def failing(*_: Any) -> tuple[gemini.GeminiAnswer, str]:
-        raise RuntimeError("quota exceeded")
+        raise RuntimeError("both Gemini models failed")
 
     monkeypatch.setattr(gemini, "answer", failing)
 
-    assert_error(ask_by_text(client, session_id), 502, "GEMINI_FAILED", WENT_WRONG["en"])
-    assert not saved_questions(db, session_id)
+
+def test_when_gemini_fails_a_live_question_describes_the_newest_stored_frame(
+    client: TestClient, db: Connection, session_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fail_gemini(monkeypatch)
+    store_frame(db, session_id, seconds_ago=30, dhash=1, labels=["chair"])
+    newest = store_frame(db, session_id, seconds_ago=4, dhash=2, labels=["door"])
+    add_text(db, newest, "EXIT")
+
+    answer = AskResponse.model_validate(ask_by_text(client, session_id).json())
+
+    expected = "4 seconds ago I saw a door ahead and a sign that says 'EXIT'."
+    assert (answer.intent, answer.answer, answer.confidence) == ("LIVE_SCENE", expected, "medium")
+    assert not answer.abstained
+    assert "gemini" in answer.timings_ms  # the time spent before falling back is still reported
+    [row] = saved_questions(db, session_id)
+    assert (row["answer"], row["model"]) == (expected, "template")
+
+
+def test_when_gemini_fails_a_memory_question_describes_its_best_frame(
+    client: TestClient, db: Connection, session_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fail_gemini(monkeypatch)
+    keys = store_frame(db, session_id, seconds_ago=60, dhash=0b0001, labels=["keys"])
+    store_frame(db, session_id, seconds_ago=20, dhash=0xF0F0, labels=["chair"])  # newer, worse
+    write_image(client, 0b0001)
+    write_image(client, 0xF0F0)
+    add_text(db, keys, "Room 204")
+
+    answer = AskResponse.model_validate(
+        ask_by_text(client, session_id, "ar", "وين تركت مفاتيحي؟").json()
+    )
+
+    expected = "قبل 60 ثانية رأيت: مفتاح أمامك ولافتة مكتوب عليها «Room 204»."
+    assert (answer.intent, answer.answer) == ("FIND_OBJECT", expected)
+    assert answer.evidence[0].frame_id == keys
+    [row] = saved_questions(db, session_id)
+    assert row["model"] == "template"
+
+
+def test_when_gemini_fails_and_nothing_is_stored_the_reply_is_not_sure(
+    client: TestClient, db: Connection, session_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fail_gemini(monkeypatch)
+    # Another session's frames are never described in this one.
+    other = db.execute(
+        "INSERT INTO sessions (app_lang, consent_at, consent_ver) VALUES ('en', now(), %s) "
+        "RETURNING id",
+        (CONSENT_VER,),
+    ).fetchone()["id"]  # type: ignore
+    store_frame(db, str(other), seconds_ago=1, dhash=3, labels=["door"])
+
+    answer = AskResponse.model_validate(ask_by_text(client, session_id).json())
+
+    assert (answer.answer, answer.confidence, answer.abstained) == (
+        gate.NOT_SURE["en"],
+        "none",
+        True,
+    )
+    [row] = saved_questions(db, session_id)
+    assert row["model"] == "template"
 
 
 def test_unknown_session_is_not_found(
@@ -487,6 +544,14 @@ def store_frame(
             (frame_id, label),
         )
     return frame_id
+
+
+def add_text(db: Connection, frame_id: int, text: str) -> None:
+    db.execute(
+        "INSERT INTO ocr_texts (frame_id, text, text_norm, confidence, bbox) "
+        "VALUES (%s, %s, lower(%s), 0.8, ARRAY[0, 0, 1, 1])",
+        (frame_id, text, text),
+    )
 
 
 def write_image(client: TestClient, dhash: int) -> None:
