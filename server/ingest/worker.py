@@ -14,6 +14,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from server.ingest.metrics import IngestMetrics
+
 logger = logging.getLogger(__name__)
 
 FrameHandler = Callable[[np.ndarray, float], None]
@@ -59,6 +61,7 @@ class IngestWorker:
         sample_hz: float = 5.0,
         no_frame_timeout_s: float = 3.0,
         reconnect_delay_s: float = 0.25,
+        metrics: IngestMetrics | None = None,
         cv2_module: Any = cv2,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -73,6 +76,7 @@ class IngestWorker:
         self._sample_period_s = 1 / sample_hz
         self._no_frame_timeout_s = no_frame_timeout_s
         self._reconnect_delay_s = reconnect_delay_s
+        self.metrics = metrics or IngestMetrics()
         self._cv2 = cv2_module
         self._monotonic = monotonic
         self._stop = threading.Event()
@@ -136,6 +140,7 @@ class IngestWorker:
             if grabbed:
                 ok, frame = capture.retrieve()
                 if ok and frame is not None:
+                    self.metrics.record_input()
                     with self._frame_lock:
                         self._latest_frame = frame
                         self._latest_at = now
@@ -185,6 +190,7 @@ class IngestWorker:
                 frame = self._latest_frame
                 captured_at = self._latest_at
             if frame is not None:
+                self.metrics.record_analysed()
                 self._frame_handler(frame, captured_at)
             next_sample += self._sample_period_s
             # Do not create a burst after a stalled downstream handler.
