@@ -16,7 +16,6 @@ out_of_scope: ["عاصمة", "الطقس", "مين ربح", "من فاز", "نك
 
 # Checked in this order; the first match wins. Seconds are counted back from when the question
 # was asked. n_min is "N minutes ago" (N±1 min) and earlier is the whole retention window.
-# ابل is how Lebanese speakers say قبل.
 # ابل is how Lebanese speakers say قبل; منذ is the standard Arabic "since".
 time:
   just:    { pattern: '(من شوي|قبل شوي|ابل شوي|للتو|قبل قليل|منذ قليل)', window_s: [3, 90] }
