@@ -24,7 +24,7 @@ from server.ingest.live_buffer import LiveBuffer
 from server.ingest.metrics import IngestMetrics
 from server.ingest.pipeline import FramePipeline
 from server.ingest.worker import IngestSource, IngestWorker
-from server.routes import ask, sessions, ws
+from server.routes import ask, dashboard, sessions, ws
 from server.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -209,6 +209,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(sessions.router)
     app.include_router(ws.router)
     app.include_router(ask.router)
+    app.include_router(dashboard.router)
 
     # One mount per kind, not all of DATA_DIR, which also holds videos and model files.
     for kind in MEDIA_KINDS:
