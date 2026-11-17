@@ -67,7 +67,7 @@ frame_novelty:
   heartbeat_seconds: 10
 face_blur:
   model_path: data/models/face_detection_yunet_2023mar.onnx
-  score_threshold: 0.9
+  score_threshold: 0.7
   nms_threshold: 0.3
   top_k: 5000
   box_margin: 0.1
