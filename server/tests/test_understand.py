@@ -118,6 +118,9 @@ def test_a_question_nothing_matches_searches_memory_and_the_live_frame() -> None
     assert understanding.use_live_frame
     assert seconds_ago(understanding.t_from) == 180
     assert not ask("What was in front of me?").use_live_frame
+    # VA-75: the standard Arabic "we saw" and "we passed" are past tense too.
+    assert not ask("ماذا رأينا؟", "ar").use_live_frame
+    assert not ask("هل مررنا بباب؟", "ar").use_live_frame
 
 
 def test_search_text_drops_stop_words() -> None:
@@ -204,6 +207,25 @@ INTENT_SET = [
     ("ar", "شو الطقس اليوم؟", "OUT_OF_SCOPE", None, []),
     ("ar", "قديش الساعة؟", "OUT_OF_SCOPE", None, []),
     ("ar", "مين ربح المباراة؟", "OUT_OF_SCOPE", None, []),
+    # --- VA-75: standard Arabic forms, and how Whisper spells some Lebanese ones ---
+    ("ar", "ما اسمه؟", "IDENTITY", None, []),
+    ("ar", "ما اسمها؟", "IDENTITY", None, []),
+    ("ar", "كم عمره؟", "IDENTITY", None, []),
+    ("ar", "كم عمرها؟", "IDENTITY", None, []),
+    ("ar", "قديش عمرو؟", "IDENTITY", None, []),
+    ("ar", "شو اسمو؟", "IDENTITY", None, []),
+    ("ar", "من هو هذا الرجل؟", "IDENTITY", None, []),
+    ("ar", "من هي؟", "IDENTITY", None, []),
+    ("ar", "هل هو رجل أم امرأة؟", "IDENTITY", None, ["person"]),
+    ("ar", "هل رأيت مفاتيحي؟", "FIND_OBJECT", (0, 1800), ["keys"]),
+    ("ar", "ماذا تقول اللافتة؟", "READ_TEXT_NOW", None, ["sign"]),
+    ("ar", "ماذا كتب على الباب؟", "READ_TEXT_NOW", None, ["door"]),
+    ("ar", "ماذا كان مكتوبا على اللافتة؟", "READ_TEXT_PAST", (0, 180), ["sign"]),
+    ("ar", "ماذا رأينا قبل قليل؟", "MEMORY", (3, 90), []),
+    ("ar", "ماذا رأينا منذ قليل؟", "MEMORY", (3, 90), []),
+    ("ar", "ماذا رأينا منذ دقيقة؟", "MEMORY", (30, 150), []),
+    ("ar", "وين كانت المفاتيح منذ دقيقتين؟", "FIND_OBJECT", (60, 180), ["keys"]),
+    ("ar", "ماذا مررنا منذ ثلاث دقائق؟", "MEMORY", (120, 240), []),
 ]
 
 
