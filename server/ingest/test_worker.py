@@ -92,3 +92,32 @@ def test_clearing_connection_frame_prevents_stale_live_samples() -> None:
 
     assert worker._latest_frame is None
     assert worker._latest_at == 0.0
+
+
+def test_sampler_recovers_after_an_unexpected_failure() -> None:
+    recovered: list[bool] = []
+    calls = 0
+
+    def handle_frame(_: np.ndarray, __: float) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("injected failure")
+
+    worker = IngestWorker(
+        IngestSource("rtsp://localhost:8554/phone"),
+        handle_frame,
+        Hub(),
+        sample_hz=100,
+        no_frame_timeout_s=0.03,
+        reconnect_delay_s=0.005,
+        restart_delay_s=0.01,
+        health_event_factory=lambda healthy: recovered.append(healthy) or {"type": "status"},
+        cv2_module=FakeCV2(),
+    )
+    worker.start()
+    time.sleep(0.08)
+    worker.stop()
+
+    assert calls >= 2
+    assert recovered == [False, True]

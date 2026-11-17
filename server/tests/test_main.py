@@ -334,6 +334,7 @@ def test_connection_events_change_only_stream_connected(settings: Settings) -> N
     app.state.ingest_metrics = IngestMetrics()
     app.state.pool = FakePool()
     app.state.stream_connected = False
+    app.state.ingest_healthy = True
     status = asyncio.run(main.read_status(app))
     app.state.last_status = status.model_copy(update={"frames_in_db": 7})
 

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 FrameHandler = Callable[[np.ndarray, float], None]
 ConnectionEventFactory = Callable[[bool], dict[str, Any]]
+HealthEventFactory = Callable[[bool], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,9 @@ class IngestWorker:
         sample_hz: float = 5.0,
         no_frame_timeout_s: float = 3.0,
         reconnect_delay_s: float = 0.25,
+        restart_delay_s: float = 2.0,
         metrics: IngestMetrics | None = None,
+        health_event_factory: HealthEventFactory | None = None,
         cv2_module: Any = cv2,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -69,6 +72,8 @@ class IngestWorker:
             raise ValueError("sample_hz must be positive")
         if no_frame_timeout_s <= 0:
             raise ValueError("no_frame_timeout_s must be positive")
+        if restart_delay_s <= 0:
+            raise ValueError("restart_delay_s must be positive")
         self._source = source
         self._frame_handler = frame_handler
         self._hub = hub
@@ -76,7 +81,9 @@ class IngestWorker:
         self._sample_period_s = 1 / sample_hz
         self._no_frame_timeout_s = no_frame_timeout_s
         self._reconnect_delay_s = reconnect_delay_s
+        self._restart_delay_s = restart_delay_s
         self.metrics = metrics or IngestMetrics()
+        self._health_event_factory = health_event_factory
         self._cv2 = cv2_module
         self._monotonic = monotonic
         self._stop = threading.Event()
@@ -115,6 +122,10 @@ class IngestWorker:
             else:
                 event = {"type": "status", "stream_connected": connected}
             self._hub.publish(event)
+
+    def _publish_health(self, healthy: bool) -> None:
+        if self._hub is not None and self._health_event_factory is not None:
+            self._hub.publish(self._health_event_factory(healthy))
 
     def _open_capture(self) -> Any:
         # OpenCV reads this option when the capture is constructed.
@@ -182,20 +193,32 @@ class IngestWorker:
     def _sample_forever(self) -> None:
         next_sample = self._monotonic()
         while not self._stop.is_set():
-            now = self._monotonic()
-            if now < next_sample:
-                self._stop.wait(next_sample - now)
-                continue
-            with self._frame_lock:
-                frame = self._latest_frame
-                captured_at = self._latest_at
-            if frame is not None:
-                self.metrics.record_analysed()
-                self._frame_handler(frame, captured_at)
-            next_sample += self._sample_period_s
-            # Do not create a burst after a stalled downstream handler.
-            if next_sample < self._monotonic():
-                next_sample = self._monotonic() + self._sample_period_s
+            try:
+                now = self._monotonic()
+                if now < next_sample:
+                    self._stop.wait(next_sample - now)
+                    continue
+                with self._frame_lock:
+                    frame = self._latest_frame
+                    captured_at = self._latest_at
+                if frame is not None:
+                    self.metrics.record_analysed()
+                    self._frame_handler(frame, captured_at)
+                next_sample += self._sample_period_s
+                # Do not create a burst after a stalled downstream handler.
+                if next_sample < self._monotonic():
+                    next_sample = self._monotonic() + self._sample_period_s
+            except Exception:
+                # The app-level handler already contains bad-frame model/OCR errors. This is the
+                # outer guard for unexpected sampler failures, so the demo resumes by itself.
+                logger.exception(
+                    "Ingest sampler failed; restarting in %.1f seconds", self._restart_delay_s
+                )
+                self._publish_health(False)
+                self._stop.wait(self._restart_delay_s)
+                if not self._stop.is_set():
+                    next_sample = self._monotonic()
+                    self._publish_health(True)
 
 
 def main() -> None:

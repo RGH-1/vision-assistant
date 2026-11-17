@@ -56,7 +56,7 @@ async def read_status(app: FastAPI) -> Status:
     metrics = app.state.ingest_metrics.snapshot()
     return Status(
         session_id=row["session_id"],
-        stream_connected=app.state.stream_connected,
+        stream_connected=app.state.stream_connected and app.state.ingest_healthy,
         input_fps=metrics.input_fps,
         analysed_fps=metrics.analysed_fps,
         saved_per_min=metrics.saved_per_min,
@@ -98,7 +98,20 @@ def create_ingest_worker(app: FastAPI) -> IngestWorker:
     def connection_event(connected: bool) -> dict[str, Any]:
         app.state.stream_connected = connected
         status = app.state.last_status.model_dump()
-        return {"type": "status", **status, "stream_connected": connected}
+        return {
+            "type": "status",
+            **status,
+            "stream_connected": connected and app.state.ingest_healthy,
+        }
+
+    def health_event(healthy: bool) -> dict[str, Any]:
+        app.state.ingest_healthy = healthy
+        status = app.state.last_status.model_dump()
+        return {
+            "type": "status",
+            **status,
+            "stream_connected": app.state.stream_connected and healthy,
+        }
 
     face_blurrer = FaceBlurrer(load_face_blur_config())
     pipeline = FramePipeline(
@@ -121,7 +134,9 @@ def create_ingest_worker(app: FastAPI) -> IngestWorker:
         sample_hz=settings.sample_hz,
         no_frame_timeout_s=settings.ingest_no_frame_timeout_s,
         reconnect_delay_s=settings.ingest_reconnect_delay_s,
+        restart_delay_s=settings.ingest_restart_delay_s,
         metrics=app.state.ingest_metrics,
+        health_event_factory=health_event,
     )
 
 
@@ -132,6 +147,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.hub = hub
     app.state.live_buffer = LiveBuffer()
     app.state.stream_connected = False
+    app.state.ingest_healthy = True
     app.state.ingest_metrics = IngestMetrics(rate_window_s=settings.status_interval_s)
 
     async with create_web_pool() as pool:
@@ -195,6 +211,7 @@ def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="Vision Assistant", lifespan=lifespan)
     app.state.settings = settings
     app.state.ingest_metrics = IngestMetrics(rate_window_s=settings.status_interval_s)
+    app.state.ingest_healthy = True
 
     app.add_middleware(
         CORSMiddleware,
