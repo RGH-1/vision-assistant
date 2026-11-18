@@ -20,7 +20,7 @@ from server.common.db import insert_frame, open_ingest_connection
 from server.common.schemas import AskResponse, Error, Lang, QueryAnsweredMessage
 from server.ingest.faceblur import FaceBlurResult
 from server.main import create_app
-from server.routes.ask import CANT_SEE, NO_FRENCH, WENT_WRONG
+from server.routes.ask import CANT_SEE, INGEST_DOWN, NO_FRENCH, WENT_WRONG
 from server.settings import Settings
 
 CONSENT_VER = "test-va-64"
@@ -334,6 +334,17 @@ def test_without_a_live_frame_the_reply_says_the_camera_is_off(
 
     assert_error(response, 503, "NO_STREAM", CANT_SEE["ar"])
     assert not gemini_calls
+
+
+def test_ingest_recovery_has_a_spoken_reply(client: TestClient, session_id: str) -> None:
+    client.app.state.stream_connected = True
+    try:
+        client.app.state.ingest_healthy = False
+        response = ask_by_text(client, session_id, "en", "What is in front of me?")
+    finally:
+        client.app.state.ingest_healthy = True
+
+    assert_error(response, 503, "NO_STREAM", INGEST_DOWN["en"])
 
 
 def fail_gemini(monkeypatch: pytest.MonkeyPatch) -> None:

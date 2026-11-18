@@ -35,6 +35,11 @@ CANT_SEE: dict[Lang, str] = {
     "ar": "لا أستطيع الرؤية الآن. الكاميرا غير متصلة.",
     "fr": "Je ne vois rien pour le moment. La caméra n'est pas connectée.",
 }
+INGEST_DOWN: dict[Lang, str] = {
+    "en": "My memory isn't updating right now.",
+    "ar": "ذاكرتي لا تتحدث الآن.",
+    "fr": "Ma mémoire ne se met pas à jour pour le moment.",
+}
 WENT_WRONG: dict[Lang, str] = {
     "en": "Sorry, something went wrong. Please try again.",
     "ar": "عذرًا، حدث خطأ ما. من فضلك حاول مرة أخرى.",
@@ -102,6 +107,8 @@ async def answer_question(
     confidence: Confidence
     if question.intent in gate.FIXED_REPLIES:
         answer, confidence, model = gate.FIXED_REPLIES[question.intent][lang], "none", "rule"
+    elif question.intent in NOW_INTENTS and not app.state.ingest_healthy:
+        return ask_error(503, "NO_STREAM", "Ingest is recovering.", INGEST_DOWN[lang])
     elif question.intent in NOW_INTENTS and frame is None:
         return ask_error(503, "NO_STREAM", "The camera stream is not connected.", CANT_SEE[lang])
     elif question.intent in NOW_INTENTS or (question.use_live_frame and frame is not None):
