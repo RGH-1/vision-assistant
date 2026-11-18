@@ -7,11 +7,11 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as status;
 
 class SessionWebSocketService {
-  static const String baseUrl = "http://192.168.8.111:8000";
-  static const String wsUrl = "ws://192.168.8.111:8000/v1/ws/phone";
+  static const String baseUrl = "http://172.16.130.7:8000";
+  static const String wsUrl = "ws://172.16.130.7:8000/v1/ws/phone";
   static const List<String> _candidateBaseUrls = [
     "http://localhost:8000",
-    "http://192.168.8.111:8000",
+    "http://172.16.130.7:8000",
   ];
 
   String _activeBaseUrl = baseUrl;
