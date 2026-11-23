@@ -7,7 +7,7 @@ class SettingsModel {
   bool alertsEnabled;
 
   SettingsModel({
-    this.serverIp = '192.168.1.50',
+    this.serverIp = '192.168.8.111',
     this.language = 'en-US',
     this.speechRate = 0.5,
     this.alertsEnabled = true,
@@ -16,7 +16,7 @@ class SettingsModel {
   static Future<SettingsModel> load() async {
     final prefs = await SharedPreferences.getInstance();
     return SettingsModel(
-      serverIp: prefs.getString('server_ip') ?? '192.168.1.50',
+      serverIp: prefs.getString('server_ip') ?? '192.168.8.111',
       language: prefs.getString('language') ?? 'en-US',
       speechRate: prefs.getDouble('speech_rate') ?? 0.5,
       alertsEnabled: prefs.getBool('alerts_enabled') ?? true,

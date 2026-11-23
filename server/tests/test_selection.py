@@ -95,7 +95,7 @@ def test_config_is_loaded_from_yaml() -> None:
     config = load_frame_selection_config()
 
     assert config.analysis_width == 640
-    assert config.sharpness_min == 60
+    assert config.sharpness_min == 15
 
 
 @pytest.mark.parametrize("field", ["analysis_width", "sharpness_history_size"])

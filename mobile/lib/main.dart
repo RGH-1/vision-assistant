@@ -80,12 +80,13 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   // Routes through FastAPI proxy / MediaMTX on port 8889
-  final String whipEndpoint = "http://172.16.130.7:8889/mystream/whip";
+  final String whipEndpoint = "http://192.168.8.111:8889/mystream/whip";
 
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   bool _isStreaming = false;
+  bool _isConnectingStream = false;
   String _statusMessage = "Ready to stream";
 
   // VA-18: Session & WebSocket Service instance
@@ -510,6 +511,9 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _startStreaming() async {
+    if (_isConnectingStream || _isStreaming) {
+      return;
+    }
     if (_localStream == null) {
       setState(() {
         _statusMessage = "Error: Camera stream not ready yet.";
@@ -518,23 +522,25 @@ class _MyHomePageState extends State<MyHomePage> {
     }
 
     setState(() {
+      _isConnectingStream = true;
       _statusMessage = "Connecting to MediaMTX...";
     });
 
     try {
-      _peerConnection = await createPeerConnection({'iceServers': []});
+      await _peerConnection?.dispose();
+      final pc = await createPeerConnection({'iceServers': []});
+      _peerConnection = pc;
 
       for (var track in _localStream!.getTracks()) {
-        _peerConnection!.addTrack(track, _localStream!);
+        await pc.addTrack(track, _localStream!);
       }
 
-      RTCSessionDescription offer = await _peerConnection!.createOffer();
-      await _peerConnection!.setLocalDescription(offer);
+      RTCSessionDescription offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
       await Future.delayed(const Duration(milliseconds: 500));
 
-      RTCSessionDescription? localDesc = await _peerConnection!
-          .getLocalDescription();
+      RTCSessionDescription? localDesc = await pc.getLocalDescription();
 
       final response = await http
           .post(
@@ -549,21 +555,30 @@ class _MyHomePageState extends State<MyHomePage> {
           response.body,
           'answer',
         );
-        await _peerConnection!.setRemoteDescription(answer);
+        await pc.setRemoteDescription(answer);
 
+        if (!mounted) return;
         setState(() {
           _isStreaming = true;
           _statusMessage = "Streaming Live Successfully!";
         });
       } else {
+        if (!mounted) return;
         setState(() {
           _statusMessage = "Failed (${response.statusCode}): ${response.body}";
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _statusMessage = "Connection failed: $e";
       });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isConnectingStream = false;
+        });
+      }
     }
   }
 
@@ -755,12 +770,14 @@ class _MyHomePageState extends State<MyHomePage> {
                                       ? 'Streaming live'
                                       : 'Start WHIP video stream',
                                   child: ElevatedButton(
-                                    onPressed: _isStreaming
+                                    onPressed: (_isStreaming || _isConnectingStream)
                                         ? null
                                         : _startStreaming,
                                     child: Text(
                                       _isStreaming
                                           ? 'Streaming Live...'
+                                          : _isConnectingStream
+                                          ? 'Connecting...'
                                           : 'Start WHIP Stream',
                                     ),
                                   ),

@@ -65,6 +65,7 @@ class IngestWorker:
         restart_delay_s: float = 2.0,
         metrics: IngestMetrics | None = None,
         health_event_factory: HealthEventFactory | None = None,
+        on_start: Callable[[], None] | None = None,
         cv2_module: Any = cv2,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -84,6 +85,7 @@ class IngestWorker:
         self._restart_delay_s = restart_delay_s
         self.metrics = metrics or IngestMetrics()
         self._health_event_factory = health_event_factory
+        self._on_start = on_start
         self._cv2 = cv2_module
         self._monotonic = monotonic
         self._stop = threading.Event()
@@ -129,16 +131,19 @@ class IngestWorker:
 
     def _open_capture(self) -> Any:
         # OpenCV reads this option when the capture is constructed.
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;3000000"
         return self._cv2.VideoCapture(self._source.url, self._cv2.CAP_FFMPEG)
 
     def _read_forever(self) -> None:
         capture: Any | None = None
         last_frame_at = self._monotonic()
         connected = False
+        prev_frame: np.ndarray | None = None
+        identical_count = 0
         while not self._stop.is_set():
             if capture is None:
                 capture = self._open_capture()
+                identical_count = 0
                 if not capture.isOpened():
                     capture.release()
                     capture = None
@@ -151,21 +156,36 @@ class IngestWorker:
             if grabbed:
                 ok, frame = capture.retrieve()
                 if ok and frame is not None:
-                    self.metrics.record_input()
-                    with self._frame_lock:
-                        self._latest_frame = frame
-                        self._latest_at = now
-                    last_frame_at = now
-                    if not connected:
-                        connected = True
-                        self._publish_connection(True)
-                    self._wait_for_file_frame(capture)
-                    continue
+                    if prev_frame is not None and np.array_equal(frame, prev_frame):
+                        identical_count += 1
+                        if identical_count >= 15:
+                            logger.info(
+                                "Frozen RTSP frame detected (%d identical); refreshing capture",
+                                identical_count,
+                            )
+                            capture.release()
+                            capture = None
+                            identical_count = 0
+                    else:
+                        prev_frame = frame.copy()
+                        identical_count = 0
+                        self.metrics.record_input()
+                        with self._frame_lock:
+                            self._latest_frame = frame
+                            self._latest_at = now
+                        last_frame_at = now
+                        if not connected:
+                            connected = True
+                            self._publish_connection(True)
+                        self._wait_for_file_frame(capture)
+                        continue
 
             if now - last_frame_at >= self._no_frame_timeout_s:
                 logger.warning("No video frame for %.1f seconds; reconnecting", now - last_frame_at)
                 capture.release()
                 capture = None
+                prev_frame = None
+                identical_count = 0
                 self._clear_latest_frame()
                 last_frame_at = now
                 if connected:
@@ -191,7 +211,13 @@ class IngestWorker:
             self._stop.wait(1 / fps)
 
     def _sample_forever(self) -> None:
+        if self._on_start is not None:
+            try:
+                self._on_start()
+            except Exception:
+                logger.exception("Ingest startup warmup failed; will retry on first frame")
         next_sample = self._monotonic()
+        last_sampled_at = 0.0
         while not self._stop.is_set():
             try:
                 now = self._monotonic()
@@ -201,7 +227,8 @@ class IngestWorker:
                 with self._frame_lock:
                     frame = self._latest_frame
                     captured_at = self._latest_at
-                if frame is not None:
+                if frame is not None and captured_at != last_sampled_at:
+                    last_sampled_at = captured_at
                     self.metrics.record_analysed()
                     self._frame_handler(frame, captured_at)
                 next_sample += self._sample_period_s

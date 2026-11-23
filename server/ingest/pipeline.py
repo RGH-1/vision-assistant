@@ -90,22 +90,28 @@ class FramePipeline:
         self._store: FrameStore | None = None
         self._retention: RetentionJob | None = None
 
-    def process(self, frame: np.ndarray, captured_at: float) -> None:
+    def warmup(self) -> None:
+        """Load GPU models and open the ingest DB connection before or on the first frame (§5.3)."""
         if self._detector is None:
-            # Loaded on the first frame, so the models load in the ingest thread (§5.3).
-            self._detector, self._clip, self._ocr = self._models()
+            detector, clip, ocr = self._models()
             self.metrics.record_gpu_mem(_cuda_allocated_bytes())
-            self._connection = self._connect()
-            self._store = FrameStore(
-                self._data_dir, self._connection, self._face_blurrer, self._hub
+            connection = self._connect()
+            store = FrameStore(
+                self._data_dir, connection, self._face_blurrer, self._hub
             )
             # Settings has loaded RETENTION_MINUTES before the ingest thread starts.
-            self._retention = RetentionJob(
+            retention = RetentionJob(
                 self._data_dir,
-                self._connection,
+                connection,
                 retention_minutes=int(os.environ.get("RETENTION_MINUTES", "30")),
             )
+            self._connection = connection
+            self._store = store
+            self._retention = retention
+            self._detector, self._clip, self._ocr = detector, clip, ocr
 
+    def process(self, frame: np.ndarray, captured_at: float) -> None:
+        self.warmup()
         self._retention.run_if_due()
 
         window = math.floor(captured_at / self._window_s)

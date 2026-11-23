@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,6 +78,7 @@ class FaceBlurrer:
 
         factory = detector_factory or cv2.FaceDetectorYN.create
         self._config = config
+        self._lock = threading.Lock()
         self._detector = factory(
             str(config.model_path),
             "",
@@ -94,8 +96,9 @@ class FaceBlurrer:
         started_at = perf_counter()
         image = frame.copy()
         height, width = image.shape[:2]
-        self._detector.setInputSize((width, height))
-        _unused, faces = self._detector.detect(image)
+        with self._lock:
+            self._detector.setInputSize((width, height))
+            _unused, faces = self._detector.detect(image)
         boxes = () if faces is None else tuple(faces)
         for face in boxes:
             x, y, box_width, box_height = (int(round(value)) for value in face[:4])
