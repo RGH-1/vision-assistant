@@ -42,9 +42,9 @@ ranking: # §6.5.3; starting weights, tuned on the test questions
 
 frame_selection:
   analysis_width: 640
-  sharpness_min: 40
-  sharpness_median_factor: 0.6
-  sharpness_soft_ratio: 0.6
+  sharpness_min: 15
+  sharpness_median_factor: 0.5
+  sharpness_soft_ratio: 0.5
   sharpness_history_size: 50
   brightness_dark: 60
   brightness_bright: 220

@@ -100,7 +100,9 @@ async def answer_question(
     timings["understand"] = ms_since(understand_started)
 
     settings: Settings = app.state.settings
-    frame = app.state.live_buffer.get_sharpest() if app.state.stream_connected else None
+    frame = app.state.live_buffer.get_sharpest(n=2) if app.state.stream_connected else None
+    if frame is not None and (time.monotonic() - frame[0]) > settings.ingest_no_frame_timeout_s * 2:
+        frame = None
     evidence: list[AskEvidence] = []
     stored: list[QuestionEvidence] = []  # evidence frames saved in Postgres
     frames: list[gemini.Frame] = []  # what Gemini will look at

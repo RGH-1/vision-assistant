@@ -97,6 +97,8 @@ def create_ingest_worker(app: FastAPI) -> IngestWorker:
 
     def connection_event(connected: bool) -> dict[str, Any]:
         app.state.stream_connected = connected
+        if not connected:
+            app.state.live_buffer.clear()
         status = app.state.last_status.model_dump()
         return {
             "type": "status",
@@ -137,6 +139,7 @@ def create_ingest_worker(app: FastAPI) -> IngestWorker:
         restart_delay_s=settings.ingest_restart_delay_s,
         metrics=app.state.ingest_metrics,
         health_event_factory=health_event,
+        on_start=pipeline.warmup,
     )
 
 
