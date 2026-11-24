@@ -364,7 +364,7 @@ webrtcLocalUDPAddress: :8189
 # Address of a local TCP listener that will receive connections.
 # This is disabled by default since TCP is less efficient than UDP and
 # introduces a progressive delay when network is congested.
-webrtcLocalTCPAddress: ''
+webrtcLocalTCPAddress: ':8189'
 # WebRTC clients need to know the IP of the server.
 # Gather IPs from interfaces and send them to clients.
 webrtcIPsFromInterfaces: yes
@@ -386,7 +386,7 @@ webrtcICEServers2: []
 # Time to wait for the WebRTC handshake to complete.
 webrtcHandshakeTimeout: 10s
 # Maximum time to gather video tracks.
-webrtcTrackGatherTimeout: 2s
+webrtcTrackGatherTimeout: 10s
 # The maximum time to gather STUN candidates.
 webrtcSTUNGatherTimeout: 5s
 
