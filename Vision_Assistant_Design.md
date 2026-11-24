@@ -125,6 +125,7 @@ The 2-minute draw.io draft had these errors. All are fixed in this design and in
 | Area | Choice | Why | Rejected |
 |---|---|---|---|
 | Server | **Python 3.12**, FastAPI, `uv` | All ML libraries are Python-first. Don't use the laptop's Python 3.14: GPU wheels lag behind. | Node, Go |
+| Audio uploads | **python-multipart** | FastAPI needs it to read the `/v1/ask` upload (multipart form, §8.1). | Parsing the form by hand |
 | Server structure | **One process**: FastAPI + an ingest **background thread** | One thing to start and debug. Events and the live buffer stay in memory, so no Redis. The ingest code is a separate module, so it could be moved to its own process later if needed. | Two processes + Redis (more moving parts) |
 | Media server | **MediaMTX** | WebRTC/WHIP in; RTSP and WebRTC/WHEP out. No code. | aiortc, Janus, LiveKit |
 | Phone → server video | **WebRTC (WHIP)**, H.264, video only, 720p | Required by the spec; low latency on a LAN. | RTMP (not on the spec's list) |
@@ -892,7 +893,8 @@ Results go in `docs/results.md` and on 2–3 slides.
 vision-assistant/
 ├── Vision_Assistant_Design.md     ← this file
 ├── README.md                      ← install, start, demo
-├── CLAUDE.md                      ← short agent rules pointing here
+├── AGENTS.md                      ← agent rules pointing here (all coding agents)
+├── CLAUDE.md                      ← one line: imports AGENTS.md for Claude Code
 ├── .env.example  .gitignore  start.ps1
 ├── contracts/  openapi.yaml  events.schema.json
 ├── infra/  docker-compose.yml (Postgres+pgvector)  mediamtx.yml

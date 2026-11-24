@@ -1,0 +1,136 @@
+# Tunable values, kept in git so changes show in the history (design §8.3).
+# Secrets and per-machine settings go in .env instead.
+
+host: 0.0.0.0 # the phone reaches the server over the LAN (§8.1)
+port: 8000
+mediamtx_webrtc_port: 8889 # §6.2
+cors_origins: # the dashboard's Vite dev server
+  - http://localhost:5173
+  - http://127.0.0.1:5173
+clip_text_model: clip-ViT-B-32-multilingual-v1 # §4
+ingest_no_frame_timeout_s: 3
+ingest_reconnect_delay_s: 0.25
+ingest_restart_delay_s: 2 # §10.3: recover an unexpected ingest failure in two seconds
+status_interval_s: 2 # §8.2
+ws_ping_interval_s: 15 # §8.2
+ws_send_timeout_s: 2 # a client this slow is dropped, and it reconnects
+stt_timeout_s: 15 # §6.4
+stt_min_avg_logprob: -0.65 # measured: clear speech -0.06 to -0.20, muffled -0.74 (§6.5.1)
+gemini_timeout_s: 30 # §6.4
+gemini_temperature: 0.2 # §6.5.4
+gemini_max_side: 1024 # images sent to Gemini are at most this long (§6.5.4)
+answer_max_sentences: 2 # spoken answers stay short (§6.5.4, Appendix A rule 4)
+answer_max_words: 30
+evidence_min: 0.35 # a best memory score below this gets "I'm not sure" without Gemini (§6.5.5)
+default_window_s: 180 # memory and past text with no time words look 3 min back (§6.5.2)
+
+retention:
+  interval_seconds: 60 # §7.5: cleanup runs in the ingest thread once per minute
+  max_frame_count: 5000 # §7.5 safety cap
+  max_frame_bytes: 2147483648 # 2 GiB, §7.5 safety cap
+  question_retention_hours: 24 # §7.5: question text expires after one day
+
+ranking: # §6.5.3; starting weights, tuned on the test questions
+  recency_s: 60 # recency = exp(-seconds_ago / 60)
+  duplicate_s: 2 # a frame less than 2 s from a better one is a near-duplicate
+  duplicate_dhash_max: 8 # ... and so is one with dHash distance <= 8
+  keep: 3 # frames kept for the answer
+  weights:
+    READ_TEXT_PAST: {clip: 0.15, text: 0.55, obj: 0.05, rec: 0.20, q: 0.05}
+    MEMORY: {clip: 0.40, text: 0.20, obj: 0.15, rec: 0.20, q: 0.05}
+    FIND_OBJECT: {clip: 0.25, text: 0.05, obj: 0.50, rec: 0.15, q: 0.05}
+
+frame_selection:
+  analysis_width: 640
+  sharpness_min: 15
+  sharpness_median_factor: 0.5
+  sharpness_soft_ratio: 0.5
+  sharpness_history_size: 50
+  brightness_dark: 60
+  brightness_bright: 220
+  contrast_min: 25
+  unsharp_sigma: 1.0
+  unsharp_amount: 1.0
+  severe_blur_ratio: 0.01
+
+frame_enhancement:
+  dark_brightness: 60
+  gamma_min: 0.6
+  gamma_max: 0.8
+  clahe_clip_limit: 2.0
+  clahe_tile_size: 8
+  unsharp_sigma: 1.0
+  unsharp_amount: 1.0
+
+frame_novelty:
+  new_distance: 12
+  duplicate_distance: 5
+  heartbeat_seconds: 10
+face_blur:
+  model_path: data/models/face_detection_yunet_2023mar.onnx
+  score_threshold: 0.7
+  nms_threshold: 0.3
+  top_k: 5000
+  box_margin: 0.1
+  blur_kernel_ratio: 0.5
+  blur_kernel_min: 31
+object_detection:
+  model: yoloe-26s-seg.pt
+  fallback_model: yoloe-11s-seg.pt
+  confidence_min: 0.35
+  image_size: 640
+  classes:
+    - person
+    - door
+    - wooden door
+    - stairs
+    - wooden stairs
+    - elevator
+    - escalator
+    - chair
+    - table
+    - desk
+    - bench
+    - sofa
+    - toilet
+    - sink
+    - trash can
+    - sign
+    - exit sign
+    - room number sign
+    - traffic light
+    - car
+    - bus
+    - bicycle
+    - motorcycle
+    - pole
+    - window
+    - laptop
+    - phone
+    - bottle
+    - cup
+    - backpack
+    - bag
+    - book
+    - keys
+    - wallet
+    - umbrella
+    - dog
+    - cat
+    - plant
+
+frame_keep:
+  detection_confidence_min: 0.35
+  edge_density_min: 0.04
+  canny_low: 100
+  canny_high: 200
+  window_seconds: 1
+ocr:
+  full_frame_max_side: 1280
+  crop_scale: 2
+  clahe_clip_limit: 2.0
+  clahe_tile_size: 8
+  denoise_h: 7
+  confidence_min: 0.4
+  min_text_length: 2
+  merge_iou: 0.5

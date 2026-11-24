@@ -1,0 +1,30 @@
+name: mobile
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_webrtc: 1.6.3
+  http: ^1.2.0
+  web_socket_channel: ^3.0.1
+  record: ^7.1.2
+  flutter_tts: ^4.2.2
+  wakelock_plus: ^1.2.8
+  permission_handler: ^11.3.1
+  audioplayers: ^6.0.0
+  shared_preferences: ^2.3.2
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

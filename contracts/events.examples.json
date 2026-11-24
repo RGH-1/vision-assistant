@@ -1,0 +1,70 @@
+[
+  {
+    "type": "hello",
+    "session_id": "3f2b8c1e-7a4d-4e6f-9b1a-2c5d8e7f6a01",
+    "app_lang": "ar"
+  },
+  {
+    "type": "alert",
+    "alert_id": 41,
+    "kind": "door_ahead",
+    "message": "Door ahead.",
+    "lang": "en",
+    "frame_id": null,
+    "thumb_url": null,
+    "created_at": "2026-11-25T10:15:32Z"
+  },
+  {
+    "type": "status",
+    "session_id": "3f2b8c1e-7a4d-4e6f-9b1a-2c5d8e7f6a01",
+    "stream_connected": true,
+    "input_fps": 24.0,
+    "analysed_fps": 4.8,
+    "saved_per_min": 18.5,
+    "frames_in_db": 412,
+    "retention_min": 30,
+    "gpu_mem_mb": 3120,
+    "last_answer_at": "2026-11-25T10:14:58Z",
+    "groq_ok": true,
+    "gemini_ok": true
+  },
+  {
+    "type": "frame_stored",
+    "frame_id": 812,
+    "captured_at": "2026-11-25T10:15:30Z",
+    "thumb_url": "/media/thumbs/812.jpg",
+    "labels": ["door", "sign"],
+    "text_preview": "Room 204 – Computer Lab",
+    "keep_reason": "text"
+  },
+  {
+    "type": "query_answered",
+    "question_id": 123,
+    "session_id": "3f2b8c1e-7a4d-4e6f-9b1a-2c5d8e7f6a01",
+    "asked_at": "2026-11-25T10:15:44Z",
+    "input_mode": "voice",
+    "stt_engine": "groq",
+    "transcript": "What did that sign say?",
+    "lang": "en",
+    "intent": "READ_TEXT_PAST",
+    "t_from": "2026-11-25T10:12:44Z",
+    "t_to": "2026-11-25T10:15:44Z",
+    "answer": "The sign on your left said \"Room 204 – Computer Lab\".",
+    "confidence": "high",
+    "abstained": false,
+    "safety_rewrite": false,
+    "model": "gemini-3.6-flash",
+    "timings_ms": { "stt": 520, "understand": 2, "retrieve": 40, "gemini": 3100, "total": 3700 },
+    "evidence": [
+      {
+        "frame_id": 812,
+        "rank": 1,
+        "score": 0.91,
+        "parts": { "clip": 0.62, "text": 1.0, "obj": 0.8, "rec": 0.79, "q": 0.7 },
+        "thumb_url": "/media/thumbs/812.jpg"
+      }
+    ]
+  },
+  { "type": "ping" },
+  { "type": "pong" }
+]

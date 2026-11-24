@@ -1,0 +1,229 @@
+"""Live ingest: turn each sampled camera frame into a stored memory frame (design §6.3.1)."""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+import os
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from uuid import UUID
+
+import numpy as np
+import psycopg
+from psycopg.types.json import Jsonb
+
+from server.common.db import open_ingest_connection
+from server.ingest.detection import YoloeDetector, load_object_detection_config
+from server.ingest.embeddings import ClipImageEncoder
+from server.ingest.enhance import EnhancementResult, FrameEnhancer, load_frame_enhancement_config
+from server.ingest.faceblur import FaceBlurrer
+from server.ingest.keep import FrameKeepCandidate, FrameKeepDecider, load_frame_keep_config
+from server.ingest.metrics import IngestMetrics
+from server.ingest.novelty import FrameNoveltySelector, load_frame_novelty_config
+from server.ingest.ocr import FrameOcr, load_ocr_config
+from server.ingest.retention import RetentionJob
+from server.ingest.selection import FrameMetrics, FrameSelector, load_frame_selection_config
+from server.ingest.store import EventPublisher, FrameStore, ProcessedFrame
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LiveCandidate(FrameKeepCandidate):
+    """A keep candidate, plus what FrameStore needs if it wins its 1-second window."""
+
+    metrics: FrameMetrics
+    enhancement: EnhancementResult
+    dhash: int
+    timings_ms: dict[str, float]
+
+
+def load_models() -> tuple[Any, Any, Any]:
+    return (
+        YoloeDetector(load_object_detection_config()),
+        ClipImageEncoder(),
+        FrameOcr(load_ocr_config()),
+    )
+
+
+def wall_clock(captured_at: float) -> datetime:
+    """The worker stamps frames with time.monotonic(); the database needs a real time."""
+    return datetime.now(UTC) - timedelta(seconds=time.monotonic() - captured_at)
+
+
+class FramePipeline:
+    """Called only from the ingest thread: it owns the GPU models and a sync connection (§5.3)."""
+
+    def __init__(
+        self,
+        data_dir: Path,
+        face_blurrer: FaceBlurrer,
+        hub: EventPublisher | None = None,
+        *,
+        models: Callable[[], tuple[Any, Any, Any]] = load_models,
+        connect: Callable[[], psycopg.Connection] = open_ingest_connection,
+        metrics: IngestMetrics | None = None,
+    ) -> None:
+        self._data_dir = data_dir
+        self._face_blurrer = face_blurrer
+        self._hub = hub
+        self._models = models
+        self._connect = connect
+        self.metrics = metrics or IngestMetrics()
+        self._selector = FrameSelector(load_frame_selection_config())
+        self._enhancer = FrameEnhancer(load_frame_enhancement_config())
+        self._novelty = FrameNoveltySelector(load_frame_novelty_config())
+        keep_config = load_frame_keep_config()
+        self._window_s = keep_config.window_seconds
+        self._keep = FrameKeepDecider(keep_config)
+        self._window: int | None = None
+        self._detector: Any = None
+        self._clip: Any = None
+        self._ocr: Any = None
+        self._connection: psycopg.Connection | None = None
+        self._store: FrameStore | None = None
+        self._retention: RetentionJob | None = None
+
+    def warmup(self) -> None:
+        """Load GPU models and open the ingest DB connection before or on the first frame (§5.3)."""
+        if self._detector is None:
+            detector, clip, ocr = self._models()
+            self.metrics.record_gpu_mem(_cuda_allocated_bytes())
+            connection = self._connect()
+            store = FrameStore(
+                self._data_dir, connection, self._face_blurrer, self._hub
+            )
+            # Settings has loaded RETENTION_MINUTES before the ingest thread starts.
+            retention = RetentionJob(
+                self._data_dir,
+                connection,
+                retention_minutes=int(os.environ.get("RETENTION_MINUTES", "30")),
+            )
+            self._connection = connection
+            self._store = store
+            self._retention = retention
+            self._detector, self._clip, self._ocr = detector, clip, ocr
+
+    def process(self, frame: np.ndarray, captured_at: float) -> None:
+        self.warmup()
+        self._retention.run_if_due()
+
+        window = math.floor(captured_at / self._window_s)
+        if window != self._window:
+            # Save the last window's winner first, so this frame's dHash is compared with it.
+            for kept in self._keep.flush():
+                self._save(kept.candidate, kept.edge_density)
+            self._window = window
+        # Its window was just flushed, so consider() never has a winner to hand back here.
+        self._keep.consider(self._candidate(frame, captured_at), captured_at)
+
+    def _candidate(self, frame: np.ndarray, captured_at: float) -> LiveCandidate | None:
+        timings_ms: dict[str, float] = {}
+        selection = _timed(timings_ms, "quality", self._selector.select, frame)
+        if not selection.accepted:
+            return None
+        enhancement = _timed(
+            timings_ms,
+            "enhance",
+            self._enhancer.enhance,
+            frame,
+            brightness=selection.metrics.brightness,
+            low_contrast="low_contrast" in selection.enhancement_reasons,
+            slightly_soft=selection.unsharp_applied,
+        )
+        detections = _timed(
+            timings_ms, "yoloe", self._detector.detect, enhancement.image, timings_ms
+        )
+        # YOLOE runs before the dHash check (§6.3.1 draws it after), because the "new objects"
+        # rule in §6.3.2 needs this frame's labels.
+        labels = [detection.label for detection in detections]
+        novelty = self._novelty.select(enhancement.image, labels, captured_at)
+        if not novelty.keep:
+            return None
+        return LiveCandidate(
+            image=enhancement.image,
+            captured_at=captured_at,
+            sharpness=selection.metrics.sharpness,
+            detections=detections,
+            keep_reason=novelty.keep_reason,
+            metrics=selection.metrics,
+            enhancement=enhancement,
+            dhash=novelty.dhash,
+            timings_ms=timings_ms,
+        )
+
+    def _save(self, candidate: LiveCandidate, edge_density: float) -> None:
+        session_id = self._open_session()
+        if session_id is None:
+            return  # no session means no consent, so nothing is remembered (§9)
+        timings_ms = dict(candidate.timings_ms)
+        # CLIP sees the blurred frame, like every stage after the face blur in §6.3.1.
+        blurred = _timed(timings_ms, "face_blur", self._face_blurrer.blur, candidate.image).image
+        stored_detections = tuple(d.as_stored_detection() for d in candidate.detections)
+        ocr = _timed(timings_ms, "ocr", self._ocr.read, blurred, stored_detections, timings_ms)
+        clip_emb = _timed(timings_ms, "clip", self._clip.encode, blurred, timings_ms)
+        enhancement = candidate.enhancement
+        frame_id = _timed(
+            timings_ms,
+            "store",
+            self._store.store,
+            ProcessedFrame(
+                session_id=session_id,
+                captured_at=wall_clock(candidate.captured_at),
+                image=candidate.image,  # FrameStore blurs it again, and counts the faces
+                sharpness=candidate.metrics.sharpness,
+                brightness=candidate.metrics.brightness,
+                contrast=candidate.metrics.contrast,
+                edge_density=edge_density,
+                dhash=candidate.dhash,
+                keep_reason=candidate.keep_reason,
+                clip_emb=clip_emb,
+                timings_ms=timings_ms,
+                detections=stored_detections,
+                ocr=ocr,
+                enhanced=enhancement.enhanced,
+                enhance_ops=enhancement.enhance_ops,
+                original=enhancement.original,
+            ),
+        )
+        with self._connection.transaction():
+            self._connection.execute(
+                "UPDATE frames SET timings_ms = %s WHERE id = %s", (Jsonb(timings_ms), frame_id)
+            )
+        self.metrics.record_saved()
+        self.metrics.record_gpu_mem(_cuda_allocated_bytes())
+        logger.info(json.dumps({"event": "frame_saved", "timings_ms": timings_ms}, sort_keys=True))
+        labels = [detection.label for detection in candidate.detections]
+        self._novelty.confirm_saved(candidate.dhash, labels, candidate.captured_at)
+
+    def _open_session(self) -> UUID | None:
+        # Its own transaction, so FrameStore's transaction commits instead of becoming a savepoint.
+        with self._connection.transaction():
+            row = self._connection.execute(
+                "SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+        return row["id"] if row else None
+
+
+def _timed(
+    timings_ms: dict[str, float], name: str, function: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    started_at = time.perf_counter()
+    try:
+        return function(*args, **kwargs)
+    finally:
+        timings_ms[name] = (time.perf_counter() - started_at) * 1000
+
+
+def _cuda_allocated_bytes() -> int | None:
+    try:
+        import torch
+    except ImportError:
+        return None
+    return int(torch.cuda.memory_allocated()) if torch.cuda.is_available() else None
