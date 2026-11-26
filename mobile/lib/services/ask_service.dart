@@ -97,12 +97,13 @@ class AskService {
   bool _isStopping = false;
 
   AskService({
-    this.baseUrl = SessionWebSocketService.baseUrl,
+    String? baseUrl,
     this.baseUrlProvider,
     AudioRecorderAdapter? recorder,
     http.Client? httpClient,
     DateTime Function()? now,
-  }) : _recorder = recorder ?? RecordAudioRecorderAdapter(),
+  }) : baseUrl = baseUrl ?? SessionWebSocketService.baseUrl,
+       _recorder = recorder ?? RecordAudioRecorderAdapter(),
        _httpClient = httpClient ?? http.Client(),
        _now = now ?? DateTime.now;
 

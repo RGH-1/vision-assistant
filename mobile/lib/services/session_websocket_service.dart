@@ -6,16 +6,32 @@ import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as status;
 
+import '../models/settings_models.dart';
+
 class SessionWebSocketService {
-  static const String baseUrl = "http://192.168.8.111:8000";
-  static const String wsUrl = "ws://192.168.8.111:8000/v1/ws/phone";
-  static const List<String> _candidateBaseUrls = [
-    "http://192.168.8.111:8000",
+  static String get baseUrl => "http://${SettingsModel.defaultServerIp}:8000";
+  static String get wsUrl =>
+      "ws://${SettingsModel.defaultServerIp}:8000/v1/ws/phone";
+
+  String _serverIp = SettingsModel.defaultServerIp;
+  String get serverIp => _serverIp;
+
+  String _activeBaseUrl = "http://${SettingsModel.defaultServerIp}:8000";
+  String get activeBaseUrl => _activeBaseUrl;
+
+  void updateServerIp(String ip) {
+    final cleaned = ip.trim();
+    if (cleaned.isEmpty) return;
+    _serverIp = cleaned;
+    _activeBaseUrl = "http://$cleaned:8000";
+  }
+
+  List<String> get _candidateBaseUrls => [
+    "http://$_serverIp:8000",
+    if (_serverIp != SettingsModel.defaultServerIp)
+      "http://${SettingsModel.defaultServerIp}:8000",
     "http://localhost:8000",
   ];
-
-  String _activeBaseUrl = baseUrl;
-  String get activeBaseUrl => _activeBaseUrl;
 
   String? _sessionId;
   String? get sessionId => _sessionId;

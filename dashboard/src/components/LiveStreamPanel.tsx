@@ -399,18 +399,23 @@ export function LiveStreamPanel({
     <section
       aria-labelledby="panel-live-title"
       data-testid="panel-live-status"
-      className="rounded-xl border border-slate-800 bg-slate-900/70 p-5 flex flex-col gap-4"
+      className="rounded-2xl border border-slate-800/90 bg-gradient-to-b from-slate-900/85 to-[#0A0F1D]/90 p-5 flex flex-col gap-4 shadow-xl shadow-black/40"
     >
       {/* Header Row: Title, Stream Connection Badge, Path Selector, and Fallback Toggle */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-        <div>
-          <h2 id="panel-live-title" className="text-base font-semibold text-white">
-            1. Live Camera &amp; System Status
-          </h2>
-          <p className="text-xs text-slate-400">
-            WebRTC (WHEP) stream viewer &amp; 2s telemetry from{' '}
-            <code className="font-mono">/v1/ws/dashboard</code>
-          </p>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3.5">
+        <div className="flex items-center gap-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-xs font-bold text-emerald-300">
+            1
+          </span>
+          <div>
+            <h2 id="panel-live-title" className="text-base font-bold text-white">
+              1. Live Camera &amp; System Status
+            </h2>
+            <p className="text-xs text-slate-400">
+              WebRTC (WHEP) stream viewer &amp; 2s telemetry from{' '}
+              <code className="font-mono text-emerald-300/90">/v1/ws/dashboard</code>
+            </p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -418,7 +423,7 @@ export function LiveStreamPanel({
           <div
             data-testid="stream-connection-badge"
             data-status={badgeLabel}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${badgeClasses}`}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-0.5 text-xs font-semibold ${badgeClasses}`}
           >
             <span className={`h-2 w-2 rounded-full ${badgeDotClasses}`} />
             <span>{badgeLabel}</span>
@@ -430,7 +435,7 @@ export function LiveStreamPanel({
             data-testid="stream-path-select"
             value={streamPath}
             onChange={(e) => setStreamPath(e.target.value as StreamPathOption)}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-xs font-mono text-slate-200 focus:border-indigo-500 focus:outline-none"
+            className="rounded-lg border border-slate-700/80 bg-slate-800/90 px-2.5 py-1 text-xs font-mono text-slate-200 focus:border-sky-500 focus:outline-none"
           >
             <option value="mystream">/mystream</option>
             <option value="phone">/phone</option>
@@ -442,9 +447,9 @@ export function LiveStreamPanel({
               type="button"
               data-testid="toggle-bbox-overlay"
               onClick={() => setShowOverlay((prev) => !prev)}
-              className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+              className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${
                 showOverlay
-                  ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300'
+                  ? 'border-sky-500/40 bg-sky-500/15 text-sky-300'
                   : 'border-slate-700 bg-slate-800 text-slate-400'
               }`}
             >
@@ -459,7 +464,7 @@ export function LiveStreamPanel({
             onClick={() =>
               setViewerMode((prev) => (prev === 'whep' ? 'iframe' : 'whep'))
             }
-            className="rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 px-2.5 py-1 text-xs font-medium text-slate-200 transition"
+            className="rounded-lg border border-slate-700/80 bg-slate-800/90 hover:bg-slate-700 px-2.5 py-1 text-xs font-semibold text-slate-200 transition"
           >
             {viewerMode === 'whep' ? 'Use Iframe Fallback' : 'Use WHEP Player'}
           </button>
@@ -467,7 +472,7 @@ export function LiveStreamPanel({
       </div>
 
       {/* Video / Iframe Stage + Bounding Box Overlay */}
-      <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-slate-800 bg-[#050811] shadow-inner">
         {viewerMode === 'whep' ? (
           <>
             <video
@@ -479,7 +484,7 @@ export function LiveStreamPanel({
               onLoadedMetadata={(e) => {
                 const playPromise = e.currentTarget.play();
                 if (playPromise && typeof playPromise.catch === 'function') {
-                  playPromise.catch(() => {});
+                  playPromise.catch(() => { });
                 }
               }}
               className="h-full w-full object-contain bg-black"
@@ -521,14 +526,14 @@ export function LiveStreamPanel({
             {whepState !== 'playing' && (
               <div
                 data-testid="whep-status-overlay"
-                className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/85 p-4 text-center"
+                className="absolute inset-0 flex flex-col items-center justify-center bg-[#060913]/90 backdrop-blur-sm p-4 text-center"
               >
-                <p className="text-sm font-medium text-slate-200" dir="auto">
+                <p className="text-sm font-semibold text-slate-200" dir="auto">
                   {whepState === 'connecting'
                     ? 'Connecting to WebRTC (WHEP) stream…'
                     : 'Waiting for phone camera stream…'}
                 </p>
-                <p className="mt-1 text-xs font-mono text-slate-400">{activeWhepUrl}</p>
+                <p className="mt-1 text-xs font-mono text-sky-400/80">{activeWhepUrl}</p>
                 {lastError && (
                   <p className="mt-2 max-w-md text-xs text-amber-300/90" dir="auto">
                     {lastError} {retryCount > 0 ? `(attempt #${retryCount})` : ''}
@@ -537,7 +542,7 @@ export function LiveStreamPanel({
                 <button
                   type="button"
                   onClick={() => setManualReconnectTick((prev) => prev + 1)}
-                  className="mt-3 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 px-3 py-1 text-xs font-medium text-slate-200 transition"
+                  className="mt-3 rounded-xl border border-sky-500/40 bg-sky-500/15 hover:bg-sky-500/25 px-3.5 py-1.5 text-xs font-semibold text-sky-200 transition"
                 >
                   Retry now
                 </button>
@@ -556,32 +561,32 @@ export function LiveStreamPanel({
       </div>
 
       {/* Live Status Telemetry Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-        <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5">
-          <span className="text-slate-400 block">Input / Analysed FPS</span>
-          <span className="font-mono text-sm font-semibold text-white">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <div className="rounded-xl bg-[#060913]/90 border border-slate-800/90 p-3 shadow-inner">
+          <span className="text-slate-400 text-[11px] font-medium block">Input / Analysed FPS</span>
+          <span className="font-mono text-sm font-bold text-sky-300 mt-0.5 block">
             {status ? `${status.input_fps} / ${status.analysed_fps}` : '0 / 0'}
           </span>
         </div>
-        <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5">
-          <span className="text-slate-400 block">Frames in DB</span>
-          <span className="font-mono text-sm font-semibold text-white">
+        <div className="rounded-xl bg-[#060913]/90 border border-slate-800/90 p-3 shadow-inner">
+          <span className="text-slate-400 text-[11px] font-medium block">Frames in DB</span>
+          <span className="font-mono text-sm font-bold text-indigo-300 mt-0.5 block">
             {status?.frames_in_db ?? 0} ({status?.saved_per_min ?? 0}/min)
           </span>
         </div>
-        <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5">
-          <span className="text-slate-400 block">Retention / GPU</span>
-          <span className="font-mono text-sm font-semibold text-white">
+        <div className="rounded-xl bg-[#060913]/90 border border-slate-800/90 p-3 shadow-inner">
+          <span className="text-slate-400 text-[11px] font-medium block">Retention / GPU</span>
+          <span className="font-mono text-sm font-bold text-emerald-300 mt-0.5 block">
             {status?.retention_min ?? 30}m /{' '}
-            {status?.gpu_mem_mb != null ? `${status.gpu_mem_mb} MB` : 'N/A'}
+            {status?.gpu_mem_mb != null ? `${Math.round(status.gpu_mem_mb)} MB` : 'N/A'}
           </span>
         </div>
-        <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5">
-          <span className="text-slate-400 block">Cloud Status</span>
-          <div className="flex items-center gap-2 mt-0.5">
+        <div className="rounded-xl bg-[#060913]/90 border border-slate-800/90 p-3 shadow-inner">
+          <span className="text-slate-400 text-[11px] font-medium block">Cloud Status</span>
+          <div className="flex items-center gap-2 mt-1">
             <span
               className={
-                status?.groq_ok ? 'text-emerald-400 font-semibold' : 'text-slate-500'
+                status?.groq_ok ? 'text-emerald-400 font-bold' : 'text-slate-400 font-medium'
               }
             >
               Groq
@@ -589,7 +594,7 @@ export function LiveStreamPanel({
             <span className="text-slate-600">·</span>
             <span
               className={
-                status?.gemini_ok ? 'text-emerald-400 font-semibold' : 'text-slate-500'
+                status?.gemini_ok ? 'text-emerald-400 font-bold' : 'text-slate-400 font-medium'
               }
             >
               Gemini

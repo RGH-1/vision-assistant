@@ -1,13 +1,15 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsModel {
+  static const String defaultServerIp = '192.168.8.111';
+
   String serverIp;
   String language;
   double speechRate;
   bool alertsEnabled;
 
   SettingsModel({
-    this.serverIp = '192.168.8.111',
+    this.serverIp = defaultServerIp,
     this.language = 'en-US',
     this.speechRate = 0.5,
     this.alertsEnabled = true,
@@ -16,7 +18,7 @@ class SettingsModel {
   static Future<SettingsModel> load() async {
     final prefs = await SharedPreferences.getInstance();
     return SettingsModel(
-      serverIp: prefs.getString('server_ip') ?? '192.168.8.111',
+      serverIp: prefs.getString('server_ip') ?? defaultServerIp,
       language: prefs.getString('language') ?? 'en-US',
       speechRate: prefs.getDouble('speech_rate') ?? 0.5,
       alertsEnabled: prefs.getBool('alerts_enabled') ?? true,

@@ -14,7 +14,28 @@ if (-not $lanIp) {
 }
 
 Write-Host "[*] Detected Laptop LAN IP: " -NoNewline; Write-Host "$lanIp" -ForegroundColor Yellow
-Write-Host "[*] Update your Flutter app config or SettingsModel serverIp to: $lanIp" -ForegroundColor DarkGray
+
+# 1b. Automatically sync detected LAN IP across MediaMTX and Flutter mobile app
+if ($lanIp) {
+    $syncFiles = @(
+        "infra/mediamtx.yml",
+        "mobile/lib/models/settings_models.dart",
+        "mobile/lib/services/session_websocket_service.dart",
+        "mobile/lib/main.dart",
+        "dashboard/src/config.ts",
+        "dashboard/src/__tests__/dashboard.test.tsx"
+    )
+    foreach ($file in $syncFiles) {
+        if (Test-Path $file) {
+            $content = Get-Content $file -Raw
+            $updated = $content -replace '\b(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1]))(?:\.\d{1,3}){2}\b', $lanIp
+            if ($updated -ne $content) {
+                Set-Content -Path $file -Value $updated -NoNewline -Encoding UTF8
+            }
+        }
+    }
+    Write-Host "    [OK] Synced LAN IP ($lanIp) to MediaMTX and Flutter app automatically." -ForegroundColor Green
+}
 Write-Host ""
 
 # 2. Check and start PostgreSQL Docker Container

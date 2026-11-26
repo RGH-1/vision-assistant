@@ -11,8 +11,9 @@ import numpy as np
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
 from server.common.db import create_web_pool
@@ -182,6 +183,49 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 @router.get("/v1/status")
 async def get_status(request: Request) -> Status:
     return await read_status(request.app)
+
+
+class TtsRequest(BaseModel):
+    text: str
+    lang: str = "en"
+    speed: float = 1.0
+
+
+@router.post("/v1/tts")
+async def synthesize_tts(body: TtsRequest) -> Response:
+    """Proxy ElevenLabs TTS using ELEVENLABS_API_KEY from .env so no key lives in the phone app."""
+    import os
+
+    import httpx
+
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ElevenLabs API key not configured.")
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL").strip()
+    model_id = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").strip()
+    lang_code = "ar" if body.lang.startswith("ar") else "fr" if body.lang.startswith("fr") else "en"
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        resp = await client.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128",
+            headers={
+                "xi-api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            json={
+                "text": body.text,
+                "model_id": model_id,
+                "language_code": lang_code,
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.75,
+                    "speed": max(0.7, min(1.2, body.speed)),
+                },
+            },
+        )
+    if resp.status_code != 200 or not resp.content:
+        raise HTTPException(status_code=502, detail="ElevenLabs synthesis failed.")
+    return Response(content=resp.content, media_type="audio/mpeg")
 
 
 def error_response(status_code: int, code: ErrorCode, message: str) -> JSONResponse:

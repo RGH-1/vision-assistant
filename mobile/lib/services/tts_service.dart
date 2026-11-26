@@ -1,7 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/settings_models.dart';
+import 'session_websocket_service.dart';
 
 abstract class TtsEngineAdapter {
   Future<dynamic> setLanguage(String language);
@@ -70,6 +76,208 @@ class FlutterTtsAdapter implements TtsEngineAdapter {
   }
 }
 
+/// ElevenLabs TTS adapter with automatic fallback to [FlutterTtsAdapter].
+///
+/// Works seamlessly with plain `flutter run` by calling the backend's `/v1/tts`
+/// proxy (which reads `ELEVENLABS_API_KEY` from `.env`), or directly if
+/// `--dart-define=ELEVENLABS_API_KEY=...` is passed.
+class ElevenLabsTtsAdapter implements TtsEngineAdapter {
+  static const String _envApiKey = String.fromEnvironment('ELEVENLABS_API_KEY');
+  static const String _envVoiceId = String.fromEnvironment(
+    'ELEVENLABS_VOICE_ID',
+    defaultValue: 'EXAVITQu4vr4xnSDxMaL', // Sarah (free-tier default natural multilingual voice)
+  );
+  static const String _envModelId = String.fromEnvironment(
+    'ELEVENLABS_MODEL_ID',
+    defaultValue: 'eleven_flash_v2_5', // Low-latency multilingual (EN, AR, FR)
+  );
+
+  final String apiKey;
+  final String voiceId;
+  final String modelId;
+  final String Function()? baseUrlProvider;
+  final http.Client _httpClient;
+  final TtsEngineAdapter _fallback;
+  AudioPlayer? _audioPlayer;
+  StreamSubscription<void>? _playerCompleteSub;
+
+  String _languageCode = 'en';
+  double _speechRate = 0.5;
+  int _activeRequestId = 0;
+  VoidCallback? _completionHandler;
+  VoidCallback? _cancelHandler;
+
+  ElevenLabsTtsAdapter({
+    String? apiKey,
+    String? voiceId,
+    String? modelId,
+    this.baseUrlProvider,
+    http.Client? httpClient,
+    TtsEngineAdapter? fallback,
+    AudioPlayer? audioPlayer,
+  }) : apiKey = (apiKey ?? _envApiKey).trim(),
+       voiceId = (voiceId ?? _envVoiceId).trim(),
+       modelId = (modelId ?? _envModelId).trim(),
+       _httpClient = httpClient ?? http.Client(),
+       _fallback = fallback ?? FlutterTtsAdapter() {
+    _audioPlayer = audioPlayer;
+  }
+
+  AudioPlayer _ensureAudioPlayer() {
+    var player = _audioPlayer;
+    if (player == null) {
+      player = AudioPlayer();
+      _audioPlayer = player;
+      _playerCompleteSub = player.onPlayerComplete.listen((_) {
+        _completionHandler?.call();
+      });
+    }
+    return player;
+  }
+
+  static String _toIsoLang(String locale) {
+    final lower = locale.trim().toLowerCase();
+    if (lower.startsWith('ar')) return 'ar';
+    if (lower.startsWith('fr')) return 'fr';
+    return 'en';
+  }
+
+  /// Maps Flutter's [0.2 .. 1.0] speechRate slider (default 0.5 -> 1.0x)
+  /// to ElevenLabs' allowed [0.7 .. 1.2] voice speed range.
+  static double mapRateToElevenLabsSpeed(double flutterRate) {
+    final scaled = 0.7 + ((flutterRate.clamp(0.2, 1.0) - 0.2) / 0.8) * 0.5;
+    return double.parse(scaled.clamp(0.7, 1.2).toStringAsFixed(2));
+  }
+
+  @override
+  Future<dynamic> setLanguage(String language) async {
+    _languageCode = _toIsoLang(language);
+    return _fallback.setLanguage(language);
+  }
+
+  @override
+  Future<dynamic> setSpeechRate(double rate) async {
+    _speechRate = rate;
+    return _fallback.setSpeechRate(rate);
+  }
+
+  @override
+  Future<dynamic> speak(String text) async {
+    final int requestId = ++_activeRequestId;
+    final double speed = mapRateToElevenLabsSpeed(_speechRate);
+
+    try {
+      final http.Response response;
+      if (apiKey.isNotEmpty) {
+        final uri = Uri.parse(
+          'https://api.elevenlabs.io/v1/text-to-speech/$voiceId?output_format=mp3_44100_128',
+        );
+        response = await _httpClient
+            .post(
+              uri,
+              headers: {
+                'xi-api-key': apiKey,
+                'Content-Type': 'application/json',
+                'Accept': 'audio/mpeg',
+              },
+              body: jsonEncode({
+                'text': text,
+                'model_id': modelId,
+                'language_code': _languageCode,
+                'voice_settings': {
+                  'stability': 0.5,
+                  'similarity_boost': 0.75,
+                  'speed': speed,
+                },
+              }),
+            )
+            .timeout(const Duration(seconds: 8));
+      } else {
+        final baseUrl = baseUrlProvider != null
+            ? baseUrlProvider!()
+            : SessionWebSocketService.baseUrl;
+        final uri = Uri.parse('$baseUrl/v1/tts');
+        response = await _httpClient
+            .post(
+              uri,
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'audio/mpeg',
+              },
+              body: jsonEncode({
+                'text': text,
+                'lang': _languageCode,
+                'speed': speed,
+              }),
+            )
+            .timeout(const Duration(seconds: 8));
+      }
+
+      if (requestId != _activeRequestId) {
+        return 1;
+      }
+
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+        final player = _ensureAudioPlayer();
+        await player.stop();
+        if (requestId != _activeRequestId) {
+          return 1;
+        }
+        await player.play(BytesSource(response.bodyBytes));
+        return 1;
+      }
+
+      if (kDebugMode) {
+        debugPrint(
+          'TTS: ElevenLabs returned HTTP ${response.statusCode}, falling back to flutter_tts.',
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('TTS: ElevenLabs failed ($e), falling back to flutter_tts.');
+      }
+    }
+
+    if (requestId != _activeRequestId) {
+      return 1;
+    }
+    return _fallback.speak(text);
+  }
+
+  @override
+  Future<dynamic> stop() async {
+    ++_activeRequestId;
+    try {
+      await _audioPlayer?.stop();
+    } catch (_) {}
+    await _fallback.stop();
+    _cancelHandler?.call();
+    return 1;
+  }
+
+  @override
+  void setCompletionHandler(VoidCallback callback) {
+    _completionHandler = callback;
+    _fallback.setCompletionHandler(callback);
+  }
+
+  @override
+  void setCancelHandler(VoidCallback callback) {
+    _cancelHandler = callback;
+    _fallback.setCancelHandler(callback);
+  }
+
+  @override
+  void setErrorHandler(void Function(dynamic message) callback) {
+    _fallback.setErrorHandler(callback);
+  }
+
+  Future<void> dispose() async {
+    await _playerCompleteSub?.cancel();
+    await _audioPlayer?.dispose();
+  }
+}
+
 class NoOpTtsEngineAdapter implements TtsEngineAdapter {
   @override
   Future<dynamic> setLanguage(String language) async => 1;
@@ -104,8 +312,10 @@ class TtsService {
 
   TtsService({
     TtsEngineAdapter? engine,
+    String Function()? baseUrlProvider,
     required this.settingsProvider,
-  }) : _engine = engine ?? FlutterTtsAdapter() {
+  }) : _engine =
+           engine ?? ElevenLabsTtsAdapter(baseUrlProvider: baseUrlProvider) {
     _engine.setCompletionHandler(_handleSpeechFinished);
     _engine.setCancelHandler(() {
       if (_suppressCancelCallback) return;
