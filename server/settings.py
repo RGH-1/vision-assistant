@@ -54,7 +54,7 @@ def load_env_file(path: Path) -> None:
         line = raw_line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip())  # a real env var wins over .env
+            os.environ[key.strip()] = value.strip()  # .env is the source of truth on startup
 
 
 def load_settings() -> Settings:
